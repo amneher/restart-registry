@@ -452,27 +452,123 @@
     border-radius: 8px;
 }
 
+/* Event metadata line */
+.rr-event-meta {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin: 8px 0 0;
+    font-size: 14px;
+    color: #555;
+}
+
+.rr-event-type {
+    background: #e7f3ff;
+    color: #0056b3;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.rr-event-date {
+    color: #888;
+}
+
+/* Affiliate badge on item card */
+.rr-affiliate-badge {
+    margin-top: 8px;
+}
+
+.rr-affiliate-badge small {
+    color: #888;
+    font-size: 11px;
+    font-style: italic;
+}
+
+/* Archive grid (used in the FSE archive template) */
+.rr-registry-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 24px;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.rr-registry-card {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 24px;
+    transition: box-shadow 0.2s;
+}
+
+.rr-registry-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+}
+
+.rr-registry-card__title {
+    margin: 0 0 10px;
+    font-size: 20px;
+}
+
+.rr-registry-card__excerpt {
+    color: #666;
+    font-size: 14px;
+    margin-bottom: 16px;
+}
+
+.rr-registry-card__meta {
+    font-size: 13px;
+    color: #888;
+    margin-bottom: 16px;
+}
+
+.rr-archive-header {
+    margin-bottom: 32px;
+}
+
+.rr-archive-intro {
+    color: #666;
+    font-size: 18px;
+}
+
+.rr-pagination {
+    margin-top: 40px;
+}
+
+.rr-no-results {
+    text-align: center;
+    padding: 40px;
+    color: #888;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
 @media (max-width: 768px) {
     .rr-form-row {
         flex-direction: column;
     }
-    
+
     .rr-form-group-small {
         flex: 1 !important;
     }
-    
-    .rr-items-grid {
+
+    .rr-items-grid,
+    .rr-registry-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .rr-share-link {
         flex-direction: column;
     }
-    
+
     .rr-invite-form form {
         flex-direction: column;
     }
-    
+
     .rr-registry-meta {
         flex-direction: column;
         align-items: flex-start;

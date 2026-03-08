@@ -97,6 +97,9 @@ class Restart_Registry_Admin {
         register_setting('restart_registry_settings', 'restart_registry_email_from');
         register_setting('restart_registry_settings', 'restart_registry_email_name');
         register_setting('restart_registry_settings', 'restart_registry_allow_guests');
+        register_setting('restart_registry_settings', 'restart_lambda_url', [
+            'sanitize_callback' => 'esc_url_raw',
+        ]);
 
         add_settings_section(
             'restart_registry_affiliate_section',
@@ -174,65 +177,55 @@ class Restart_Registry_Admin {
     }
 
     public function display_dashboard_page() {
-        global $wpdb;
-        
-        $registries_count = $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}restart_registries");
-        $items_count = $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}restart_registry_items");
-        $purchases_count = $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}restart_registry_purchases");
-        
+        $registries_count = wp_count_posts('restart-registry');
+        $total = ($registries_count->publish ?? 0) + ($registries_count->private ?? 0);
+
+        $recent = get_posts([
+            'post_type'      => 'restart-registry',
+            'posts_per_page' => 5,
+            'post_status'    => ['publish', 'private'],
+            'orderby'        => 'date',
+            'order'          => 'DESC',
+        ]);
         ?>
         <div class="wrap">
             <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
-            
+
             <div class="restart-registry-dashboard">
                 <div class="dashboard-widgets">
                     <div class="dashboard-widget">
                         <h3><?php _e('Total Registries', 'restart-registry'); ?></h3>
-                        <span class="count"><?php echo intval($registries_count); ?></span>
+                        <span class="count"><?php echo intval($total); ?></span>
                     </div>
                     <div class="dashboard-widget">
-                        <h3><?php _e('Total Items', 'restart-registry'); ?></h3>
-                        <span class="count"><?php echo intval($items_count); ?></span>
-                    </div>
-                    <div class="dashboard-widget">
-                        <h3><?php _e('Items Purchased', 'restart-registry'); ?></h3>
-                        <span class="count"><?php echo intval($purchases_count); ?></span>
+                        <h3><?php _e('Lambda API', 'restart-registry'); ?></h3>
+                        <span class="count" style="font-size:14px">
+                            <?php echo get_option('restart_lambda_url') ? __('Configured', 'restart-registry') : '<span style="color:#dc3545">' . __('Not set', 'restart-registry') . '</span>'; ?>
+                        </span>
                     </div>
                 </div>
 
                 <div class="dashboard-recent">
                     <h2><?php _e('Recent Registries', 'restart-registry'); ?></h2>
-                    <?php
-                    $recent = $wpdb->get_results("
-                        SELECT r.*, u.display_name 
-                        FROM {$wpdb->prefix}restart_registries r
-                        LEFT JOIN {$wpdb->users} u ON r.user_id = u.ID
-                        ORDER BY r.created_at DESC 
-                        LIMIT 5
-                    ");
-                    
-                    if ($recent): ?>
+                    <?php if ($recent): ?>
                         <table class="wp-list-table widefat fixed striped">
                             <thead>
                                 <tr>
                                     <th><?php _e('Title', 'restart-registry'); ?></th>
                                     <th><?php _e('Owner', 'restart-registry'); ?></th>
-                                    <th><?php _e('Items', 'restart-registry'); ?></th>
+                                    <th><?php _e('Status', 'restart-registry'); ?></th>
                                     <th><?php _e('Created', 'restart-registry'); ?></th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($recent as $registry): 
-                                    $item_count = $wpdb->get_var($wpdb->prepare(
-                                        "SELECT COUNT(*) FROM {$wpdb->prefix}restart_registry_items WHERE registry_id = %d",
-                                        $registry->id
-                                    ));
+                                <?php foreach ($recent as $post):
+                                    $author = get_userdata($post->post_author);
                                 ?>
                                     <tr>
-                                        <td><?php echo esc_html($registry->title); ?></td>
-                                        <td><?php echo esc_html($registry->display_name); ?></td>
-                                        <td><?php echo intval($item_count); ?></td>
-                                        <td><?php echo esc_html(date_i18n(get_option('date_format'), strtotime($registry->created_at))); ?></td>
+                                        <td><a href="<?php echo esc_url(get_permalink($post->ID)); ?>" target="_blank"><?php echo esc_html($post->post_title); ?></a></td>
+                                        <td><?php echo $author ? esc_html($author->display_name) : '—'; ?></td>
+                                        <td><?php echo $post->post_status === 'publish' ? __('Public', 'restart-registry') : __('Private', 'restart-registry'); ?></td>
+                                        <td><?php echo esc_html(get_the_date(get_option('date_format'), $post->ID)); ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -247,51 +240,49 @@ class Restart_Registry_Admin {
     }
 
     public function display_registries_page() {
-        global $wpdb;
-        
-        $registries = $wpdb->get_results("
-            SELECT r.*, u.display_name, u.user_email,
-                   (SELECT COUNT(*) FROM {$wpdb->prefix}restart_registry_items WHERE registry_id = r.id) as item_count
-            FROM {$wpdb->prefix}restart_registries r
-            LEFT JOIN {$wpdb->users} u ON r.user_id = u.ID
-            ORDER BY r.created_at DESC
-        ");
-        
+        $registries = get_posts([
+            'post_type'      => 'restart-registry',
+            'posts_per_page' => -1,
+            'post_status'    => ['publish', 'private'],
+            'orderby'        => 'date',
+            'order'          => 'DESC',
+        ]);
         ?>
         <div class="wrap">
             <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
-            
+
             <table class="wp-list-table widefat fixed striped">
                 <thead>
                     <tr>
                         <th><?php _e('Title', 'restart-registry'); ?></th>
                         <th><?php _e('Owner', 'restart-registry'); ?></th>
-                        <th><?php _e('Email', 'restart-registry'); ?></th>
-                        <th><?php _e('Items', 'restart-registry'); ?></th>
-                        <th><?php _e('Visibility', 'restart-registry'); ?></th>
+                        <th><?php _e('Status', 'restart-registry'); ?></th>
+                        <th><?php _e('Items (meta)', 'restart-registry'); ?></th>
                         <th><?php _e('Created', 'restart-registry'); ?></th>
                         <th><?php _e('Actions', 'restart-registry'); ?></th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if ($registries): ?>
-                        <?php foreach ($registries as $registry): ?>
+                        <?php foreach ($registries as $post):
+                            $author   = get_userdata($post->post_author);
+                            $item_ids = json_decode(get_post_meta($post->ID, 'restart_item_ids', true) ?: '[]', true);
+                        ?>
                             <tr>
-                                <td><strong><?php echo esc_html($registry->title); ?></strong></td>
-                                <td><?php echo esc_html($registry->display_name); ?></td>
-                                <td><?php echo esc_html($registry->user_email); ?></td>
-                                <td><?php echo intval($registry->item_count); ?></td>
-                                <td><?php echo $registry->is_public ? __('Public', 'restart-registry') : __('Private', 'restart-registry'); ?></td>
-                                <td><?php echo esc_html(date_i18n(get_option('date_format'), strtotime($registry->created_at))); ?></td>
+                                <td><strong><?php echo esc_html($post->post_title); ?></strong></td>
+                                <td><?php echo $author ? esc_html($author->display_name) : '—'; ?></td>
+                                <td><?php echo $post->post_status === 'publish' ? __('Public', 'restart-registry') : __('Private', 'restart-registry'); ?></td>
+                                <td><?php echo count($item_ids); ?></td>
+                                <td><?php echo esc_html(get_the_date(get_option('date_format'), $post->ID)); ?></td>
                                 <td>
-                                    <a href="<?php echo esc_url(add_query_arg('registry', $registry->share_key, home_url('/registry/'))); ?>" target="_blank"><?php _e('View', 'restart-registry'); ?></a>
+                                    <a href="<?php echo esc_url(get_permalink($post->ID)); ?>" target="_blank"><?php _e('View', 'restart-registry'); ?></a>
+                                    &nbsp;|&nbsp;
+                                    <a href="<?php echo esc_url(get_edit_post_link($post->ID)); ?>"><?php _e('Edit', 'restart-registry'); ?></a>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
                     <?php else: ?>
-                        <tr>
-                            <td colspan="7"><?php _e('No registries found.', 'restart-registry'); ?></td>
-                        </tr>
+                        <tr><td colspan="6"><?php _e('No registries found.', 'restart-registry'); ?></td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>
@@ -383,6 +374,20 @@ class Restart_Registry_Admin {
                                    name="restart_registry_email_name" 
                                    value="<?php echo esc_attr(get_option('restart_registry_email_name', get_bloginfo('name'))); ?>" 
                                    class="regular-text">
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">
+                            <label for="restart_lambda_url"><?php _e('Lambda API URL', 'restart-registry'); ?></label>
+                        </th>
+                        <td>
+                            <input type="url"
+                                   id="restart_lambda_url"
+                                   name="restart_lambda_url"
+                                   value="<?php echo esc_attr(get_option('restart_lambda_url', getenv('RESTART_LAMBDA_URL') ?: '')); ?>"
+                                   class="regular-text"
+                                   placeholder="https://your-lambda-endpoint.execute-api.us-east-1.amazonaws.com">
+                            <p class="description"><?php _e('Base URL of the Restart Lambda FastAPI service (no trailing slash). Can also be set via the RESTART_LAMBDA_URL environment variable.', 'restart-registry'); ?></p>
                         </td>
                     </tr>
                     <tr>

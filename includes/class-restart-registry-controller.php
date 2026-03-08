@@ -3,7 +3,11 @@
 /**
  * Registry Controller
  *
- * Handles all registry CRUD operations
+ * Manages registry CRUD via the WordPress CPT (restart-registry) for
+ * registry metadata and the Lambda FastAPI service for item data.
+ *
+ * Registry identity  → WP post ID  (replaces the old share_key)
+ * Item identity      → Lambda SQLite row ID (stored in restart_item_ids meta)
  *
  * @package    Restart_Registry
  * @subpackage Restart_Registry/includes
@@ -11,442 +15,415 @@
 
 class Restart_Registry_Controller {
 
+    /** @var Restart_Registry_Lambda_Client */
+    private $lambda;
+
+    /** @var Restart_Registry_Affiliate_Converter */
     private $affiliate_converter;
 
     public function __construct() {
+        require_once plugin_dir_path(__FILE__) . 'class-lambda-api-client.php';
         require_once plugin_dir_path(__FILE__) . 'class-affiliate-converter.php';
+        $this->lambda              = new Restart_Registry_Lambda_Client();
         $this->affiliate_converter = new Restart_Registry_Affiliate_Converter();
     }
 
-    public function create_registry($user_id, $title, $description = '', $is_public = false) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registries';
+    // =========================================================================
+    // Registry read
+    // =========================================================================
 
-        $existing = $wpdb->get_var($wpdb->prepare(
-            "SELECT id FROM $table WHERE user_id = %d LIMIT 1",
-            $user_id
-        ));
+    /**
+     * Build a registry array from a WP post object (without items).
+     */
+    private function post_to_registry(\WP_Post $post): array {
+        $invitees = json_decode(get_post_meta($post->ID, 'restart_invitees', true) ?: '[]', true) ?: [];
+        $item_ids = json_decode(get_post_meta($post->ID, 'restart_item_ids', true) ?: '[]', true) ?: [];
 
-        if ($existing) {
-            return new WP_Error('registry_exists', __('You already have a registry.', 'restart-registry'));
-        }
-
-        $share_key = $this->generate_share_key();
-
-        $result = $wpdb->insert(
-            $table,
-            array(
-                'user_id' => $user_id,
-                'title' => sanitize_text_field($title),
-                'description' => sanitize_textarea_field($description),
-                'share_key' => $share_key,
-                'is_public' => $is_public ? 1 : 0,
-            ),
-            array('%d', '%s', '%s', '%s', '%d')
-        );
-
-        if ($result === false) {
-            return new WP_Error('db_error', __('Failed to create registry.', 'restart-registry'));
-        }
-
-        return array(
-            'id' => $wpdb->insert_id,
-            'share_key' => $share_key,
-        );
+        return [
+            'id'          => $post->ID,
+            'user_id'     => (int) $post->post_author,
+            'title'       => $post->post_title,
+            'description' => $post->post_content,
+            'is_public'   => $post->post_status === 'publish',
+            'permalink'   => get_permalink($post->ID),
+            // backward-compat alias used in the public shortcode class
+            'share_key'   => $post->ID,
+            'meta'        => [
+                'invitees'   => $invitees,
+                'item_ids'   => $item_ids,
+                'event_type' => get_post_meta($post->ID, 'restart_event_type', true) ?: '',
+                'event_date' => get_post_meta($post->ID, 'restart_event_date', true) ?: '',
+            ],
+            // items populated separately to avoid eager-loading Lambda on every call
+            'items' => [],
+        ];
     }
 
-    public function get_registry($registry_id) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registries';
-
-        $registry = $wpdb->get_row($wpdb->prepare(
-            "SELECT * FROM $table WHERE id = %d",
-            $registry_id
-        ), ARRAY_A);
-
-        if (!$registry) {
+    /**
+     * Get a registry by WP post ID (with items loaded from Lambda).
+     */
+    public function get_registry(int $registry_id) {
+        $post = get_post($registry_id);
+        if (!$post || $post->post_type !== 'restart-registry') {
             return new WP_Error('not_found', __('Registry not found.', 'restart-registry'));
         }
-
-        $registry['items'] = $this->get_registry_items($registry_id);
+        $registry           = $this->post_to_registry($post);
+        $registry['items']  = $this->get_registry_items($registry_id);
         return $registry;
     }
 
-    public function get_registry_by_share_key($share_key) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registries';
+    /**
+     * Look up a registry by its WP post ID (numeric string) or post slug.
+     * Used by the ?registry=<key> share-link flow.
+     */
+    public function get_registry_by_share_key(string $key) {
+        if (is_numeric($key)) {
+            return $this->get_registry((int) $key);
+        }
 
-        $registry = $wpdb->get_row($wpdb->prepare(
-            "SELECT * FROM $table WHERE share_key = %s",
-            $share_key
-        ), ARRAY_A);
+        $posts = get_posts([
+            'post_type'      => 'restart-registry',
+            'name'           => $key,
+            'posts_per_page' => 1,
+            'post_status'    => ['publish', 'private'],
+        ]);
 
-        if (!$registry) {
+        if (empty($posts)) {
             return new WP_Error('not_found', __('Registry not found.', 'restart-registry'));
         }
 
-        $registry['items'] = $this->get_registry_items($registry['id']);
+        $registry          = $this->post_to_registry($posts[0]);
+        $registry['items'] = $this->get_registry_items($posts[0]->ID);
         return $registry;
     }
 
-    public function get_user_registry($user_id) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registries';
+    /**
+     * Get the first registry belonging to a WP user (with items).
+     */
+    public function get_user_registry(int $user_id): ?array {
+        $posts = get_posts([
+            'post_type'      => 'restart-registry',
+            'author'         => $user_id,
+            'posts_per_page' => 1,
+            'post_status'    => ['publish', 'private', 'draft'],
+        ]);
 
-        $registry = $wpdb->get_row($wpdb->prepare(
-            "SELECT * FROM $table WHERE user_id = %d",
-            $user_id
-        ), ARRAY_A);
-
-        if (!$registry) {
+        if (empty($posts)) {
             return null;
         }
 
-        $registry['items'] = $this->get_registry_items($registry['id']);
+        $registry          = $this->post_to_registry($posts[0]);
+        $registry['items'] = $this->get_registry_items($posts[0]->ID);
         return $registry;
     }
 
-    public function update_registry($registry_id, $data) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registries';
+    // =========================================================================
+    // Registry write
+    // =========================================================================
 
-        $update_data = array();
-        $formats = array();
+    /**
+     * Create a new registry WP post for a user.
+     * Returns ['id' => post_id, 'share_key' => post_id] or WP_Error.
+     */
+    public function create_registry(int $user_id, string $title, string $description = '', bool $is_public = false) {
+        $existing = get_posts([
+            'post_type'      => 'restart-registry',
+            'author'         => $user_id,
+            'posts_per_page' => 1,
+            'post_status'    => ['publish', 'private', 'draft'],
+        ]);
+
+        if (!empty($existing)) {
+            return new WP_Error('registry_exists', __('You already have a registry.', 'restart-registry'));
+        }
+
+        $post_id = wp_insert_post([
+            'post_type'    => 'restart-registry',
+            'post_title'   => sanitize_text_field($title),
+            'post_content' => sanitize_textarea_field($description),
+            'post_status'  => $is_public ? 'publish' : 'private',
+            'post_author'  => $user_id,
+        ], true);
+
+        if (is_wp_error($post_id)) {
+            return $post_id;
+        }
+
+        update_post_meta($post_id, 'restart_invitees', '[]');
+        update_post_meta($post_id, 'restart_item_ids', '[]');
+        update_post_meta($post_id, 'restart_event_type', '');
+        update_post_meta($post_id, 'restart_event_date', '');
+
+        return [
+            'id'        => $post_id,
+            'share_key' => $post_id,
+        ];
+    }
+
+    /**
+     * Update registry post fields.
+     * Accepted keys: title, description, is_public, event_type, event_date.
+     */
+    public function update_registry(int $registry_id, array $data): bool {
+        $update = ['ID' => $registry_id];
 
         if (isset($data['title'])) {
-            $update_data['title'] = sanitize_text_field($data['title']);
-            $formats[] = '%s';
+            $update['post_title'] = sanitize_text_field($data['title']);
         }
-
         if (isset($data['description'])) {
-            $update_data['description'] = sanitize_textarea_field($data['description']);
-            $formats[] = '%s';
+            $update['post_content'] = sanitize_textarea_field($data['description']);
         }
-
         if (isset($data['is_public'])) {
-            $update_data['is_public'] = $data['is_public'] ? 1 : 0;
-            $formats[] = '%d';
+            $update['post_status'] = $data['is_public'] ? 'publish' : 'private';
         }
 
-        if (empty($update_data)) {
-            return new WP_Error('no_data', __('No data to update.', 'restart-registry'));
+        if (count($update) > 1) {
+            wp_update_post($update);
         }
 
-        $result = $wpdb->update(
-            $table,
-            $update_data,
-            array('id' => $registry_id),
-            $formats,
-            array('%d')
-        );
+        if (isset($data['event_type'])) {
+            update_post_meta($registry_id, 'restart_event_type', sanitize_text_field($data['event_type']));
+        }
+        if (isset($data['event_date'])) {
+            update_post_meta($registry_id, 'restart_event_date', sanitize_text_field($data['event_date']));
+        }
 
-        return $result !== false;
+        return true;
     }
 
-    public function delete_registry($registry_id) {
-        global $wpdb;
-        
-        $wpdb->delete($wpdb->prefix . 'restart_registry_items', array('registry_id' => $registry_id), array('%d'));
-        $wpdb->delete($wpdb->prefix . 'restart_registry_invites', array('registry_id' => $registry_id), array('%d'));
-        $wpdb->delete($wpdb->prefix . 'restart_registry_purchases', array('registry_id' => $registry_id), array('%d'));
-        
-        return $wpdb->delete($wpdb->prefix . 'restart_registries', array('id' => $registry_id), array('%d'));
+    /**
+     * Delete a registry post and all its Lambda items.
+     */
+    public function delete_registry(int $registry_id): bool {
+        $item_ids = json_decode(get_post_meta($registry_id, 'restart_item_ids', true) ?: '[]', true) ?: [];
+        foreach ($item_ids as $item_id) {
+            $this->lambda->delete_item((int) $item_id);
+        }
+        return (bool) wp_delete_post($registry_id, true);
     }
 
-    public function add_item($registry_id, $data) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registry_items';
+    // =========================================================================
+    // Items
+    // =========================================================================
 
-        $url = esc_url_raw($data['url']);
+    /**
+     * Fetch all Lambda items for a registry (order preserved from meta).
+     */
+    public function get_registry_items(int $registry_id): array {
+        $item_ids = json_decode(get_post_meta($registry_id, 'restart_item_ids', true) ?: '[]', true) ?: [];
+        if (empty($item_ids)) {
+            return [];
+        }
+        return $this->lambda->get_items($item_ids);
+    }
+
+    /**
+     * Fetch a single Lambda item.
+     */
+    public function get_item(int $item_id) {
+        return $this->lambda->get_item($item_id);
+    }
+
+    /**
+     * Create a Lambda item and link its ID to the registry meta.
+     * Returns ['id' => lambda_id, 'is_affiliate' => bool, 'retailer' => string] or WP_Error.
+     *
+     * Required: name, url.  Optional: description, price, quantity.
+     */
+    public function add_item(int $registry_id, array $data) {
+        $url              = esc_url_raw($data['url']);
         $affiliate_result = $this->affiliate_converter->convert_url($url);
 
-        $result = $wpdb->insert(
-            $table,
-            array(
-                'registry_id' => $registry_id,
-                'name' => sanitize_text_field($data['name']),
-                'description' => isset($data['description']) ? sanitize_textarea_field($data['description']) : '',
-                'original_url' => $url,
-                'affiliate_url' => $affiliate_result['affiliate_url'],
-                'image_url' => isset($data['image_url']) ? esc_url_raw($data['image_url']) : '',
-                'price' => isset($data['price']) ? floatval($data['price']) : null,
-                'retailer' => $affiliate_result['retailer'],
-                'quantity_needed' => isset($data['quantity']) ? intval($data['quantity']) : 1,
-                'priority' => isset($data['priority']) ? sanitize_text_field($data['priority']) : 'medium',
-            ),
-            array('%d', '%s', '%s', '%s', '%s', '%s', '%f', '%s', '%d', '%s')
-        );
+        $lambda_data = [
+            'name'  => sanitize_text_field($data['name']),
+            'url'   => $affiliate_result['affiliate_url'] ?: $url,
+            'price' => !empty($data['price']) ? (float) $data['price'] : 0.01,
+        ];
 
-        if ($result === false) {
-            return new WP_Error('db_error', __('Failed to add item.', 'restart-registry'));
+        if (!empty($data['description'])) {
+            $lambda_data['description'] = sanitize_textarea_field($data['description']);
+        }
+        if ($affiliate_result['retailer']) {
+            $lambda_data['retailer'] = $affiliate_result['retailer'];
+        }
+        if ($affiliate_result['is_affiliate']) {
+            $lambda_data['affiliate_status'] = 'converted';
+        }
+        if (!empty($data['quantity'])) {
+            $lambda_data['quantity_needed'] = (int) $data['quantity'];
         }
 
-        return array(
-            'id' => $wpdb->insert_id,
+        $item = $this->lambda->create_item($lambda_data);
+        if (is_wp_error($item)) {
+            return $item;
+        }
+
+        // Link item ID in post meta
+        $item_ids   = json_decode(get_post_meta($registry_id, 'restart_item_ids', true) ?: '[]', true) ?: [];
+        $item_ids[] = (int) $item['id'];
+        update_post_meta($registry_id, 'restart_item_ids', json_encode($item_ids));
+
+        return [
+            'id'           => $item['id'],
             'is_affiliate' => $affiliate_result['is_affiliate'],
-            'retailer' => $affiliate_result['retailer'],
-        );
+            'retailer'     => $affiliate_result['retailer'],
+            'html_item'    => $item,
+        ];
     }
 
-    public function get_registry_items($registry_id) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registry_items';
+    /**
+     * Update a Lambda item's editable fields.
+     * Accepted keys: name, description, price, quantity (→ quantity_needed).
+     */
+    public function update_item(int $item_id, array $data) {
+        $update = [];
+        if (isset($data['name']))        $update['name']           = sanitize_text_field($data['name']);
+        if (isset($data['description'])) $update['description']    = sanitize_textarea_field($data['description']);
+        if (isset($data['price']))       $update['price']          = max(0.01, (float) $data['price']);
+        if (isset($data['quantity']))    $update['quantity_needed'] = max(1, (int) $data['quantity']);
 
-        return $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM $table WHERE registry_id = %d ORDER BY priority DESC, created_at ASC",
-            $registry_id
-        ), ARRAY_A);
-    }
-
-    public function get_item($item_id) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registry_items';
-
-        return $wpdb->get_row($wpdb->prepare(
-            "SELECT * FROM $table WHERE id = %d",
-            $item_id
-        ), ARRAY_A);
-    }
-
-    public function update_item($item_id, $data) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registry_items';
-
-        $update_data = array();
-        $formats = array();
-
-        if (isset($data['name'])) {
-            $update_data['name'] = sanitize_text_field($data['name']);
-            $formats[] = '%s';
-        }
-
-        if (isset($data['description'])) {
-            $update_data['description'] = sanitize_textarea_field($data['description']);
-            $formats[] = '%s';
-        }
-
-        if (isset($data['quantity'])) {
-            $update_data['quantity_needed'] = intval($data['quantity']);
-            $formats[] = '%d';
-        }
-
-        if (isset($data['priority'])) {
-            $update_data['priority'] = sanitize_text_field($data['priority']);
-            $formats[] = '%s';
-        }
-
-        if (isset($data['price'])) {
-            $update_data['price'] = floatval($data['price']);
-            $formats[] = '%f';
-        }
-
-        if (isset($data['image_url'])) {
-            $update_data['image_url'] = esc_url_raw($data['image_url']);
-            $formats[] = '%s';
-        }
-
-        if (empty($update_data)) {
+        if (empty($update)) {
             return new WP_Error('no_data', __('No data to update.', 'restart-registry'));
         }
 
-        $result = $wpdb->update(
-            $table,
-            $update_data,
-            array('id' => $item_id),
-            $formats,
-            array('%d')
-        );
-
-        return $result !== false;
+        return $this->lambda->update_item($item_id, $update);
     }
 
-    public function delete_item($item_id) {
-        global $wpdb;
-        
-        $wpdb->delete($wpdb->prefix . 'restart_registry_purchases', array('item_id' => $item_id), array('%d'));
-        
-        return $wpdb->delete($wpdb->prefix . 'restart_registry_items', array('id' => $item_id), array('%d'));
+    /**
+     * Delete a Lambda item and remove it from the registry meta.
+     */
+    public function delete_item(int $item_id, int $registry_id): bool {
+        $this->lambda->delete_item($item_id);
+
+        $item_ids = json_decode(get_post_meta($registry_id, 'restart_item_ids', true) ?: '[]', true) ?: [];
+        $item_ids = array_values(array_filter($item_ids, fn($id) => (int) $id !== $item_id));
+        update_post_meta($registry_id, 'restart_item_ids', json_encode($item_ids));
+
+        return true;
     }
 
-    public function mark_item_purchased($item_id, $quantity = 1, $purchaser_name = '', $purchaser_email = '', $is_anonymous = false) {
-        global $wpdb;
-        
-        $item = $this->get_item($item_id);
-        if (!$item) {
+    /**
+     * Increment quantity_purchased for an item.
+     * Returns the updated item or WP_Error.
+     */
+    public function mark_item_purchased(int $item_id, int $quantity = 1, string $purchaser_name = '', string $purchaser_email = '', bool $is_anonymous = false) {
+        $item = $this->lambda->get_item($item_id);
+        if (!$item || is_wp_error($item)) {
             return new WP_Error('not_found', __('Item not found.', 'restart-registry'));
         }
 
-        $remaining = $item['quantity_needed'] - $item['quantity_purchased'];
+        $current   = (int) ($item['quantity_purchased'] ?? 0);
+        $needed    = (int) ($item['quantity_needed'] ?? 1);
+        $remaining = $needed - $current;
+
         if ($quantity > $remaining) {
             return new WP_Error('quantity_exceeded', __('Cannot purchase more than needed.', 'restart-registry'));
         }
 
-        $purchases_table = $wpdb->prefix . 'restart_registry_purchases';
-        $wpdb->insert(
-            $purchases_table,
-            array(
-                'item_id' => $item_id,
-                'registry_id' => $item['registry_id'],
-                'purchaser_name' => sanitize_text_field($purchaser_name),
-                'purchaser_email' => sanitize_email($purchaser_email),
-                'quantity' => $quantity,
-                'is_anonymous' => $is_anonymous ? 1 : 0,
-            ),
-            array('%d', '%d', '%s', '%s', '%d', '%d')
-        );
-
-        $items_table = $wpdb->prefix . 'restart_registry_items';
-        $wpdb->query($wpdb->prepare(
-            "UPDATE $items_table SET quantity_purchased = quantity_purchased + %d WHERE id = %d",
-            $quantity,
-            $item_id
-        ));
-
-        return true;
+        return $this->lambda->update_item($item_id, ['quantity_purchased' => $current + $quantity]);
     }
 
-    public function send_invite($registry_id, $email) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registry_invites';
+    // =========================================================================
+    // Invites
+    // =========================================================================
 
-        $existing = $wpdb->get_var($wpdb->prepare(
-            "SELECT id FROM $table WHERE registry_id = %d AND email = %s",
-            $registry_id,
-            $email
-        ));
+    /**
+     * Add an email or WP username to the registry invitee list and send an email.
+     * Returns ['invite_id' => index] or WP_Error.
+     */
+    public function send_invite(int $registry_id, string $invitee) {
+        $invitees = json_decode(get_post_meta($registry_id, 'restart_invitees', true) ?: '[]', true) ?: [];
 
-        if ($existing) {
-            return new WP_Error('already_invited', __('This email has already been invited.', 'restart-registry'));
+        if (in_array($invitee, $invitees, true)) {
+            return new WP_Error('already_invited', __('This contact has already been invited.', 'restart-registry'));
         }
 
-        $invite_token = wp_generate_password(32, false);
+        $invitees[] = $invitee;
+        update_post_meta($registry_id, 'restart_invitees', json_encode($invitees));
 
-        $result = $wpdb->insert(
-            $table,
-            array(
-                'registry_id' => $registry_id,
-                'email' => sanitize_email($email),
-                'invite_token' => $invite_token,
-            ),
-            array('%d', '%s', '%s')
-        );
-
-        if ($result === false) {
-            return new WP_Error('db_error', __('Failed to create invite.', 'restart-registry'));
+        if (is_email($invitee)) {
+            $this->send_invite_email($invitee, $registry_id);
         }
 
-        $registry = $this->get_registry($registry_id);
-        $registry_url = add_query_arg('registry', $registry['share_key'], home_url('/registry/'));
-        
-        $this->send_invite_email($email, $registry, $registry_url);
+        return ['invite_id' => count($invitees) - 1];
+    }
 
-        return array(
-            'invite_id' => $wpdb->insert_id,
-            'token' => $invite_token,
+    /**
+     * Return the invitee list as an array of row-like arrays.
+     */
+    public function get_registry_invites(int $registry_id): array {
+        $invitees = json_decode(get_post_meta($registry_id, 'restart_invitees', true) ?: '[]', true) ?: [];
+        return array_map(
+            fn($invitee, $i) => ['id' => $i, 'email' => $invitee],
+            $invitees,
+            array_keys($invitees)
         );
     }
 
-    private function send_invite_email($email, $registry, $registry_url) {
-        $user = get_userdata($registry['user_id']);
-        $user_name = $user ? $user->display_name : 'Someone';
+    private function send_invite_email(string $email, int $registry_id): void {
+        $post      = get_post($registry_id);
+        $author    = $post ? get_userdata((int) $post->post_author) : null;
+        $name      = $author ? $author->display_name : __('Someone', 'restart-registry');
+        $title     = $post ? $post->post_title : __('a gift registry', 'restart-registry');
+        $link      = get_permalink($registry_id) ?: home_url('/');
 
-        $subject = sprintf(__('%s invited you to view their gift registry!', 'restart-registry'), $user_name);
-        
+        $subject = sprintf(__('%s invited you to view their gift registry!', 'restart-registry'), $name);
         $message = sprintf(
-            __("Hello!\n\n%s has invited you to view their gift registry: %s\n\nClick the link below to see their wishlist:\n%s\n\nBest regards,\nThe Registry Team", 'restart-registry'),
-            $user_name,
-            $registry['title'],
-            $registry_url
+            __("Hello!\n\n%s has invited you to view their gift registry: %s\n\nClick below to see their wishlist:\n%s\n\nBest,\nThe Restart Team", 'restart-registry'),
+            $name,
+            $title,
+            $link
         );
 
-        $headers = array('Content-Type: text/plain; charset=UTF-8');
-
-        wp_mail($email, $subject, $message, $headers);
+        wp_mail($email, $subject, $message);
     }
 
-    public function get_registry_invites($registry_id) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registry_invites';
+    // =========================================================================
+    // Access control
+    // =========================================================================
 
-        return $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM $table WHERE registry_id = %d ORDER BY sent_at DESC",
-            $registry_id
-        ), ARRAY_A);
-    }
-
-    public function resend_invite($invite_id) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registry_invites';
-
-        $invite = $wpdb->get_row($wpdb->prepare(
-            "SELECT * FROM $table WHERE id = %d",
-            $invite_id
-        ), ARRAY_A);
-
-        if (!$invite) {
-            return new WP_Error('not_found', __('Invite not found.', 'restart-registry'));
-        }
-
-        $registry = $this->get_registry($invite['registry_id']);
-        $registry_url = add_query_arg('registry', $registry['share_key'], home_url('/registry/'));
-        
-        $this->send_invite_email($invite['email'], $registry, $registry_url);
-
-        $wpdb->update(
-            $table,
-            array('sent_at' => current_time('mysql')),
-            array('id' => $invite_id),
-            array('%s'),
-            array('%d')
-        );
-
-        return true;
-    }
-
-    public function delete_invite($invite_id) {
-        global $wpdb;
-        return $wpdb->delete($wpdb->prefix . 'restart_registry_invites', array('id' => $invite_id), array('%d'));
-    }
-
-    public function can_view_registry($registry_id, $user_id = null) {
-        $registry = $this->get_registry($registry_id);
-        
-        if (is_wp_error($registry)) {
+    /**
+     * True if the user may view the registry (public, owner, admin, or invitee).
+     */
+    public function can_view_registry(int $registry_id, ?int $user_id = null): bool {
+        $post = get_post($registry_id);
+        if (!$post || $post->post_type !== 'restart-registry') {
             return false;
         }
 
-        if ($registry['is_public']) {
+        if ($post->post_status === 'publish') {
+            return true;
+        }
+        if ($user_id && (int) $post->post_author === $user_id) {
+            return true;
+        }
+        if ($user_id && user_can($user_id, 'manage_restart_registry')) {
             return true;
         }
 
-        if ($user_id && $registry['user_id'] == $user_id) {
-            return true;
+        // Check invitee list (email or username match)
+        if ($user_id) {
+            $invitees = json_decode(get_post_meta($registry_id, 'restart_invitees', true) ?: '[]', true) ?: [];
+            $user     = get_userdata($user_id);
+            if ($user && (
+                in_array($user->user_email, $invitees, true) ||
+                in_array($user->user_login, $invitees, true)
+            )) {
+                return true;
+            }
         }
 
         return false;
     }
 
-    public function can_edit_registry($registry_id, $user_id) {
-        $registry = $this->get_registry($registry_id);
-        
-        if (is_wp_error($registry)) {
+    /**
+     * True if the user may edit the registry (author or admin).
+     */
+    public function can_edit_registry(int $registry_id, int $user_id): bool {
+        $post = get_post($registry_id);
+        if (!$post || $post->post_type !== 'restart-registry') {
             return false;
         }
-
-        return $registry['user_id'] == $user_id || current_user_can('manage_restart_registry');
-    }
-
-    private function generate_share_key() {
-        return wp_generate_password(16, false);
-    }
-
-    public function get_item_purchases($item_id) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'restart_registry_purchases';
-
-        return $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM $table WHERE item_id = %d ORDER BY purchased_at DESC",
-            $item_id
-        ), ARRAY_A);
+        return (int) $post->post_author === $user_id || user_can($user_id, 'manage_restart_registry');
     }
 }
