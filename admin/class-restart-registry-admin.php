@@ -17,10 +17,13 @@ class Restart_Registry_Admin {
 
     public function __construct($plugin_name, $version) {
         $this->plugin_name = $plugin_name;
-        $this->version = $version;
+        $this->version     = $version;
 
-        add_action('admin_menu', array($this, 'add_admin_menu'));
-        add_action('admin_init', array($this, 'register_settings'));
+        add_action('admin_menu',                                        array($this, 'add_admin_menu'));
+        add_action('admin_init',                                        array($this, 'register_settings'));
+        add_action('admin_post_restart_registry_create_pages',           array($this, 'handle_create_pages'));
+        add_action('wp_ajax_restart_registry_test_lambda',              array($this, 'ajax_test_lambda'));
+        add_action('wp_ajax_restart_registry_reconvert_affiliates',     array($this, 'ajax_reconvert_affiliates'));
     }
 
     public function enqueue_styles() {
@@ -28,7 +31,11 @@ class Restart_Registry_Admin {
     }
 
     public function enqueue_scripts() {
-        wp_enqueue_script($this->plugin_name, plugin_dir_url(__FILE__) . 'js/restart-registry-admin.js', array('jquery'), $this->version, false);
+        wp_enqueue_script($this->plugin_name, plugin_dir_url(__FILE__) . 'js/restart-registry-admin.js', array('jquery'), $this->version, true);
+        wp_localize_script($this->plugin_name, 'rrAdmin', array(
+            'ajaxurl' => admin_url('admin-ajax.php'),
+            'nonce'   => wp_create_nonce('restart_registry_admin_nonce'),
+        ));
     }
 
     public function add_admin_menu() {
@@ -100,6 +107,8 @@ class Restart_Registry_Admin {
         register_setting('restart_registry_settings', 'restart_lambda_url', [
             'sanitize_callback' => 'esc_url_raw',
         ]);
+        register_setting('restart_registry_settings', 'restart_lambda_username');
+        register_setting('restart_registry_settings', 'restart_lambda_app_password');
 
         add_settings_section(
             'restart_registry_affiliate_section',
@@ -174,6 +183,148 @@ class Restart_Registry_Admin {
         <?php if (isset($args['description'])): ?>
             <p class="description"><?php echo esc_html($args['description']); ?></p>
         <?php endif;
+    }
+
+    /** Create the "My Registry" page and redirect back to settings. */
+    public function handle_create_pages() {
+        check_admin_referer('restart_registry_create_pages');
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions.', 'restart-registry'));
+        }
+
+        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-restart-registry-activator.php';
+        Restart_Registry_Activator::create_pages();
+
+        wp_redirect(add_query_arg(
+            ['page' => 'restart-registry-settings', 'pages_created' => '1'],
+            admin_url('admin.php')
+        ));
+        exit;
+    }
+
+    /** AJAX: ping the Lambda service and return its health status. */
+    public function ajax_test_lambda() {
+        check_ajax_referer('restart_registry_admin_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Insufficient permissions.']);
+        }
+
+        $url = get_option('restart_lambda_url') ?: getenv('RESTART_LAMBDA_URL') ?: '';
+        if (empty($url)) {
+            wp_send_json_error(['message' => __('Lambda URL is not configured.', 'restart-registry')]);
+        }
+
+        $response = wp_remote_get(rtrim($url, '/') . '/health', ['timeout' => 8]);
+
+        if (is_wp_error($response)) {
+            wp_send_json_error(['message' => $response->get_error_message()]);
+        }
+
+        $code = wp_remote_retrieve_response_code($response);
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+
+        if ($code === 200) {
+            wp_send_json_success(['message' => __('Connection successful!', 'restart-registry'), 'status' => $body]);
+        }
+
+        wp_send_json_error(['message' => sprintf(__('Unexpected response: HTTP %d', 'restart-registry'), $code)]);
+    }
+
+    /** AJAX: re-run the affiliate converter on every item's original URL. */
+    public function ajax_reconvert_affiliates() {
+        check_ajax_referer('restart_registry_admin_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Insufficient permissions.']);
+        }
+
+        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-lambda-api-client.php';
+        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-affiliate-converter.php';
+
+        $lambda    = new Restart_Registry_Lambda_Client();
+        $converter = new Restart_Registry_Affiliate_Converter();
+
+        if (!$lambda->is_configured()) {
+            wp_send_json_error(['message' => __('Lambda API is not configured.', 'restart-registry')]);
+        }
+
+        $registry_ids = get_posts([
+            'post_type'      => 'restart-registry',
+            'posts_per_page' => -1,
+            'post_status'    => ['publish', 'private', 'draft'],
+            'fields'         => 'ids',
+        ]);
+
+        $updated      = 0;
+        $skipped      = 0;
+        $not_found    = 0;
+        $errors       = 0;
+        $first_error  = '';
+
+        foreach ($registry_ids as $registry_id) {
+            $item_ids   = json_decode(get_post_meta($registry_id, 'restart_item_ids', true) ?: '[]', true) ?: [];
+            $clean_ids  = [];
+            $meta_dirty = false;
+
+            foreach ($item_ids as $item_id) {
+                $item = $lambda->get_item((int) $item_id);
+                if ($item === null) {
+                    $not_found++;
+                    $meta_dirty = true;
+                    continue;
+                }
+                if (is_wp_error($item)) {
+                    $errors++;
+                    if (!$first_error) $first_error = $item->get_error_message();
+                    $clean_ids[] = $item_id;
+                    continue;
+                }
+
+                $clean_ids[] = $item_id;
+
+                $url = $item['url'] ?? '';
+                if (empty($url)) {
+                    $skipped++;
+                    continue;
+                }
+
+                $result = $converter->convert_url($url);
+
+                if (!$result['is_affiliate']) {
+                    $skipped++;
+                    continue;
+                }
+
+                $update = $lambda->update_item((int) $item_id, [
+                    'affiliate_url'    => $result['affiliate_url'],
+                    'affiliate_status' => 'active',
+                ]);
+
+                if (is_wp_error($update)) {
+                    $errors++;
+                } else {
+                    $updated++;
+                }
+            }
+
+            if ($meta_dirty) {
+                update_post_meta($registry_id, 'restart_item_ids', json_encode(array_values($clean_ids)));
+            }
+        }
+
+        $parts = [
+            sprintf(_n('%d item updated.', '%d items updated.', $updated, 'restart-registry'), $updated),
+        ];
+        if ($skipped)   $parts[] = sprintf(_n('%d skipped.', '%d skipped.', $skipped, 'restart-registry'), $skipped);
+        if ($not_found) $parts[] = sprintf(_n('%d stale reference removed.', '%d stale references removed.', $not_found, 'restart-registry'), $not_found);
+        if ($errors)    $parts[] = sprintf(_n('%d error.', '%d errors.', $errors, 'restart-registry'), $errors) . ($first_error ? " ({$first_error})" : '');
+
+        wp_send_json_success([
+            'message'   => implode(' ', $parts),
+            'updated'   => $updated,
+            'skipped'   => $skipped,
+            'not_found' => $not_found,
+            'errors'    => $errors,
+        ]);
     }
 
     public function display_dashboard_page() {
@@ -294,7 +445,13 @@ class Restart_Registry_Admin {
         ?>
         <div class="wrap">
             <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
-            
+
+            <?php if (isset($_GET['settings-updated'])): ?>
+                <div class="notice notice-success is-dismissible">
+                    <p><?php _e('Affiliate settings saved.', 'restart-registry'); ?></p>
+                </div>
+            <?php endif; ?>
+
             <div class="notice notice-info">
                 <p><strong><?php _e('How Affiliate Links Work:', 'restart-registry'); ?></strong></p>
                 <p><?php _e('When users add products from supported retailers, the plugin automatically converts the links to affiliate links using your IDs. The original link is preserved and users can see both - this ensures transparency and builds trust.', 'restart-registry'); ?></p>
@@ -307,6 +464,17 @@ class Restart_Registry_Admin {
                 submit_button(__('Save Affiliate Settings', 'restart-registry'));
                 ?>
             </form>
+
+            <hr>
+
+            <h2><?php _e('Re-convert Affiliate Links', 'restart-registry'); ?></h2>
+            <p><?php _e('Re-runs the affiliate converter on every item\'s original URL using your current affiliate IDs. Use this after updating an affiliate ID above.', 'restart-registry'); ?></p>
+            <button type="button" id="rr-reconvert-affiliates" class="button button-secondary">
+                <?php _e('Re-convert All Affiliate Links', 'restart-registry'); ?>
+            </button>
+            <span id="rr-reconvert-result" style="margin-left:10px;font-style:italic"></span>
+
+            <hr>
 
             <div class="supported-retailers">
                 <h2><?php _e('Supported Retailers', 'restart-registry'); ?></h2>
@@ -327,15 +495,28 @@ class Restart_Registry_Admin {
     }
 
     public function display_settings_page() {
+        $page_id   = get_option('restart_registry_page_id');
+        $page_ok   = $page_id && get_post($page_id) && get_post_status($page_id) !== 'trash';
+        $pages_created = isset($_GET['pages_created']);
         ?>
         <div class="wrap">
             <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
-            
+
+            <?php if ($pages_created): ?>
+                <div class="notice notice-success is-dismissible">
+                    <p><?php _e('"My Registry" page created successfully.', 'restart-registry'); ?></p>
+                </div>
+            <?php endif; ?>
+
+            <?php if (isset($_GET['settings-updated'])): ?>
+                <div class="notice notice-success is-dismissible">
+                    <p><?php _e('Settings saved.', 'restart-registry'); ?></p>
+                </div>
+            <?php endif; ?>
+
             <form action="options.php" method="post">
-                <?php
-                settings_fields('restart_registry_settings');
-                ?>
-                
+                <?php settings_fields('restart_registry_settings'); ?>
+
                 <table class="form-table">
                     <tr>
                         <th scope="row">
@@ -343,13 +524,23 @@ class Restart_Registry_Admin {
                         </th>
                         <td>
                             <?php
-                            wp_dropdown_pages(array(
-                                'name' => 'restart_registry_page_id',
-                                'selected' => get_option('restart_registry_page_id'),
+                            wp_dropdown_pages([
+                                'name'             => 'restart_registry_page_id',
+                                'selected'         => $page_id,
                                 'show_option_none' => __('— Select a page —', 'restart-registry'),
-                            ));
+                            ]);
                             ?>
-                            <p class="description"><?php _e('Select the page where the [restart_registry] shortcode is placed.', 'restart-registry'); ?></p>
+                            <p class="description">
+                                <?php if ($page_ok): ?>
+                                    <?php printf(
+                                        __('Currently set to <a href="%s" target="_blank">%s</a>.', 'restart-registry'),
+                                        esc_url(get_permalink($page_id)),
+                                        esc_html(get_the_title($page_id))
+                                    ); ?>
+                                <?php else: ?>
+                                    <?php _e('No page configured. Use the button below to create one automatically.', 'restart-registry'); ?>
+                                <?php endif; ?>
+                            </p>
                         </td>
                     </tr>
                     <tr>
@@ -357,10 +548,10 @@ class Restart_Registry_Admin {
                             <label for="restart_registry_email_from"><?php _e('Email From Address', 'restart-registry'); ?></label>
                         </th>
                         <td>
-                            <input type="email" 
-                                   id="restart_registry_email_from" 
-                                   name="restart_registry_email_from" 
-                                   value="<?php echo esc_attr(get_option('restart_registry_email_from', get_option('admin_email'))); ?>" 
+                            <input type="email"
+                                   id="restart_registry_email_from"
+                                   name="restart_registry_email_from"
+                                   value="<?php echo esc_attr(get_option('restart_registry_email_from', get_option('admin_email'))); ?>"
                                    class="regular-text">
                         </td>
                     </tr>
@@ -369,10 +560,10 @@ class Restart_Registry_Admin {
                             <label for="restart_registry_email_name"><?php _e('Email From Name', 'restart-registry'); ?></label>
                         </th>
                         <td>
-                            <input type="text" 
-                                   id="restart_registry_email_name" 
-                                   name="restart_registry_email_name" 
-                                   value="<?php echo esc_attr(get_option('restart_registry_email_name', get_bloginfo('name'))); ?>" 
+                            <input type="text"
+                                   id="restart_registry_email_name"
+                                   name="restart_registry_email_name"
+                                   value="<?php echo esc_attr(get_option('restart_registry_email_name', get_bloginfo('name'))); ?>"
                                    class="regular-text">
                         </td>
                     </tr>
@@ -384,44 +575,100 @@ class Restart_Registry_Admin {
                             <input type="url"
                                    id="restart_lambda_url"
                                    name="restart_lambda_url"
-                                   value="<?php echo esc_attr(get_option('restart_lambda_url', getenv('RESTART_LAMBDA_URL') ?: '')); ?>"
+                                   value="<?php echo esc_attr(get_option('restart_lambda_url') ?: getenv('RESTART_LAMBDA_URL') ?: ''); ?>"
                                    class="regular-text"
                                    placeholder="https://your-lambda-endpoint.execute-api.us-east-1.amazonaws.com">
-                            <p class="description"><?php _e('Base URL of the Restart Lambda FastAPI service (no trailing slash). Can also be set via the RESTART_LAMBDA_URL environment variable.', 'restart-registry'); ?></p>
+                            <p class="description"><?php _e('Base URL of the Restart Lambda FastAPI service (no trailing slash). Can also be set via RESTART_LAMBDA_URL env var.', 'restart-registry'); ?></p>
+                            <button type="button" id="rr-test-lambda" class="button" style="margin-top:6px">
+                                <?php _e('Test Connection', 'restart-registry'); ?>
+                            </button>
+                            <span id="rr-lambda-test-result" style="margin-left:10px;font-style:italic"></span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">
+                            <label for="restart_lambda_username"><?php _e('Lambda WP Username', 'restart-registry'); ?></label>
+                        </th>
+                        <td>
+                            <input type="text"
+                                   id="restart_lambda_username"
+                                   name="restart_lambda_username"
+                                   value="<?php echo esc_attr(get_option('restart_lambda_username', '')); ?>"
+                                   class="regular-text"
+                                   autocomplete="off">
+                            <p class="description"><?php _e('WordPress username the plugin uses to authenticate with Lambda.', 'restart-registry'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">
+                            <label for="restart_lambda_app_password"><?php _e('Lambda Application Password', 'restart-registry'); ?></label>
+                        </th>
+                        <td>
+                            <input type="password"
+                                   id="restart_lambda_app_password"
+                                   name="restart_lambda_app_password"
+                                   value="<?php echo esc_attr(get_option('restart_lambda_app_password', '')); ?>"
+                                   class="regular-text"
+                                   autocomplete="new-password">
+                            <p class="description"><?php _e('WP Application Password for the username above. Generate one under Users → Profile → Application Passwords.', 'restart-registry'); ?></p>
                         </td>
                     </tr>
                     <tr>
                         <th scope="row"><?php _e('Guest Purchases', 'restart-registry'); ?></th>
                         <td>
                             <label>
-                                <input type="checkbox" 
-                                       name="restart_registry_allow_guests" 
-                                       value="1" 
+                                <input type="checkbox"
+                                       name="restart_registry_allow_guests"
+                                       value="1"
                                        <?php checked(get_option('restart_registry_allow_guests'), 1); ?>>
                                 <?php _e('Allow guests to mark items as purchased without logging in', 'restart-registry'); ?>
                             </label>
                         </td>
                     </tr>
                 </table>
-                
+
                 <?php submit_button(); ?>
             </form>
 
             <hr>
-            
+
+            <h2><?php _e('Page Setup', 'restart-registry'); ?></h2>
+            <p><?php _e('Click below to automatically create a "My Registry" page with the <code>[restart_registry]</code> shortcode.', 'restart-registry'); ?></p>
+            <?php if ($page_ok): ?>
+                <p><?php printf(
+                    __('<strong>Page exists:</strong> <a href="%s" target="_blank">%s</a>', 'restart-registry'),
+                    esc_url(get_permalink($page_id)),
+                    esc_html(get_the_title($page_id))
+                ); ?></p>
+            <?php endif; ?>
+            <form action="<?php echo esc_url(admin_url('admin-post.php')); ?>" method="post">
+                <input type="hidden" name="action" value="restart_registry_create_pages">
+                <?php wp_nonce_field('restart_registry_create_pages'); ?>
+                <?php submit_button(
+                    $page_ok
+                        ? __('Recreate Registry Page', 'restart-registry')
+                        : __('Create "My Registry" Page', 'restart-registry'),
+                    'secondary',
+                    '',
+                    false
+                ); ?>
+            </form>
+
+            <hr>
+
             <h2><?php _e('Shortcodes', 'restart-registry'); ?></h2>
             <table class="form-table">
                 <tr>
                     <th><code>[restart_registry]</code></th>
-                    <td><?php _e('Display the main registry interface (create/view/manage)', 'restart-registry'); ?></td>
+                    <td><?php _e('Main registry interface — shows create form, owner manage view, or guest view depending on context.', 'restart-registry'); ?></td>
                 </tr>
                 <tr>
-                    <th><code>[restart_registry_view]</code></th>
-                    <td><?php _e('Display a registry for viewing only (use with registry="share_key")', 'restart-registry'); ?></td>
+                    <th><code>[restart_registry_view registry="ID"]</code></th>
+                    <td><?php _e('Read-only view of a specific registry by WP post ID or slug.', 'restart-registry'); ?></td>
                 </tr>
                 <tr>
                     <th><code>[restart_registry_create]</code></th>
-                    <td><?php _e('Display the registry creation form', 'restart-registry'); ?></td>
+                    <td><?php _e('Registry creation form only.', 'restart-registry'); ?></td>
                 </tr>
             </table>
         </div>

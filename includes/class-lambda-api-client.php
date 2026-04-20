@@ -19,11 +19,20 @@ class Restart_Registry_Lambda_Client {
     /** @var int HTTP request timeout in seconds. */
     private $timeout = 10;
 
+    /** @var string|null Basic-auth credentials as "username:password", or null if unconfigured. */
+    private $auth;
+
     public function __construct() {
         $this->base_url = rtrim(
-            get_option('restart_lambda_url', getenv('RESTART_LAMBDA_URL') ?: ''),
+            get_option('restart_lambda_url') ?: getenv('RESTART_LAMBDA_URL') ?: '',
             '/'
         );
+
+        $username = get_option('restart_lambda_username', getenv('RESTART_LAMBDA_USERNAME') ?: '');
+        $password = get_option('restart_lambda_app_password', getenv('RESTART_LAMBDA_APP_PASSWORD') ?: '');
+        if ($username && $password) {
+            $this->auth = base64_encode("{$username}:{$password}");
+        }
     }
 
     /** True when a Lambda URL has been configured. */
@@ -117,10 +126,15 @@ class Restart_Registry_Lambda_Client {
             );
         }
 
+        $headers = ['Content-Type' => 'application/json'];
+        if ($this->auth) {
+            $headers['Authorization'] = 'Basic ' . $this->auth;
+        }
+
         $args = [
             'method'  => $method,
             'timeout' => $this->timeout,
-            'headers' => ['Content-Type' => 'application/json'],
+            'headers' => $headers,
         ];
 
         if ($body !== null) {

@@ -235,9 +235,10 @@ class Restart_Registry_Controller {
         $affiliate_result = $this->affiliate_converter->convert_url($url);
 
         $lambda_data = [
-            'name'  => sanitize_text_field($data['name']),
-            'url'   => $affiliate_result['affiliate_url'] ?: $url,
-            'price' => !empty($data['price']) ? (float) $data['price'] : 0.01,
+            'registry_id' => $registry_id,
+            'name'        => sanitize_text_field($data['name']),
+            'url'         => $url,
+            'price'       => !empty($data['price']) ? (float) $data['price'] : null,
         ];
 
         if (!empty($data['description'])) {
@@ -246,11 +247,15 @@ class Restart_Registry_Controller {
         if ($affiliate_result['retailer']) {
             $lambda_data['retailer'] = $affiliate_result['retailer'];
         }
-        if ($affiliate_result['is_affiliate']) {
-            $lambda_data['affiliate_status'] = 'converted';
+        if ($affiliate_result['is_affiliate'] && !empty($affiliate_result['affiliate_url'])) {
+            $lambda_data['affiliate_url']    = $affiliate_result['affiliate_url'];
+            $lambda_data['affiliate_status'] = 'active';
         }
         if (!empty($data['quantity'])) {
             $lambda_data['quantity_needed'] = (int) $data['quantity'];
+        }
+        if (!empty($data['image_url'])) {
+            $lambda_data['image_url'] = esc_url_raw($data['image_url']);
         }
 
         $item = $this->lambda->create_item($lambda_data);
@@ -273,14 +278,16 @@ class Restart_Registry_Controller {
 
     /**
      * Update a Lambda item's editable fields.
-     * Accepted keys: name, description, price, quantity (→ quantity_needed).
+     * Accepted keys: name, url, description, price, quantity (→ quantity_needed).
      */
     public function update_item(int $item_id, array $data) {
         $update = [];
         if (isset($data['name']))        $update['name']           = sanitize_text_field($data['name']);
+        if (!empty($data['url']))        $update['url']            = esc_url_raw($data['url']);
         if (isset($data['description'])) $update['description']    = sanitize_textarea_field($data['description']);
-        if (isset($data['price']))       $update['price']          = max(0.01, (float) $data['price']);
+        if (!empty($data['price']))      $update['price']          = max(0.01, (float) $data['price']);
         if (isset($data['quantity']))    $update['quantity_needed'] = max(1, (int) $data['quantity']);
+        if (isset($data['image_url']))   $update['image_url']      = !empty($data['image_url']) ? esc_url_raw($data['image_url']) : null;
 
         if (empty($update)) {
             return new WP_Error('no_data', __('No data to update.', 'restart-registry'));

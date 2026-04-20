@@ -30,7 +30,7 @@ class Restart_Registry_Deactivator {
 	 * @since    1.0.0
 	 */
 	public static function deactivate() {
-		// TODO
+		remove_role('registry_user');
 	}
 
 }
