@@ -335,9 +335,7 @@ class Restart_Registry_Public {
                         <span class="rr-col-actions"></span>
                     </div>
                     <div id="rr-items-container">
-                        <?php if (empty($registry['items'])): ?>
-                            <p class="rr-no-items"><?php _e('No items yet — add something you need to restart.', 'restart-registry'); ?></p>
-                        <?php else: ?>
+                        <?php if (!empty($registry['items'])): ?>
                             <ul class="rr-item-list">
                                 <?php foreach ($registry['items'] as $item): ?>
                                     <?php echo $this->render_item_row($item); ?>
@@ -346,6 +344,9 @@ class Restart_Registry_Public {
                         <?php endif; ?>
                     </div>
                 </div>
+                <?php if (empty($registry['items'])): ?>
+                    <p class="rr-no-items"><?php _e('No items yet — add something you need to restart.', 'restart-registry'); ?></p>
+                <?php endif; ?>
 
                 <?php if (!empty($disclosure)): ?>
                     <p class="rr-affiliate-note"><small><?php echo esc_html($disclosure); ?></small></p>
@@ -600,15 +601,14 @@ class Restart_Registry_Public {
                         <span class="rr-col-actions"></span>
                     </div>
                     <div class="rr-items-grid" id="rr-items-container">
-                        <?php if (empty($registry['items'])): ?>
-                            <p class="rr-no-items"><?php _e('No items in this registry yet.', 'restart-registry'); ?></p>
-                        <?php else: ?>
-                            <?php foreach ($registry['items'] as $item): ?>
-                                <?php echo $this->render_item_card($item, false, (bool) $allow_guests); ?>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
+                        <?php foreach ($registry['items'] as $item): ?>
+                            <?php echo $this->render_item_card($item, false, (bool) $allow_guests); ?>
+                        <?php endforeach; ?>
                     </div>
                 </div>
+                <?php if (empty($registry['items'])): ?>
+                    <p class="rr-no-items"><?php _e('No items in this registry yet.', 'restart-registry'); ?></p>
+                <?php endif; ?>
 
                 <?php if (!empty($disclosure)): ?>
                     <p class="rr-affiliate-note"><small><?php echo esc_html($disclosure); ?></small></p>
