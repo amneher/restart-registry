@@ -928,6 +928,19 @@ class Restart_Registry_Public {
             wp_send_json_error(['message' => __('Please enter a URL.', 'restart-registry')]);
         }
 
+        // Try a retailer API first when a key is configured — skips the scraper entirely
+        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-retailer-api.php';
+        $api_data = (new Restart_Registry_Retailer_API())->fetch_if_configured($url);
+        if ($api_data !== null) {
+            require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-affiliate-converter.php';
+            $aff = (new Restart_Registry_Affiliate_Converter())->convert_url($url);
+            wp_send_json_success(array_merge($api_data, [
+                'retailer'     => $aff['retailer'],
+                'is_affiliate' => $aff['is_affiliate'],
+            ]));
+            return;
+        }
+
         $response = wp_remote_get($url, [
             'timeout'    => 15,
             'user-agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',

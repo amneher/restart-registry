@@ -100,6 +100,11 @@ class Restart_Registry_Admin {
         register_setting('restart_registry_affiliates', 'restart_registry_cj_id');
         register_setting('restart_registry_affiliates', 'restart_registry_affiliate_disclosure');
 
+        // Retailer API keys
+        register_setting('restart_registry_affiliates', 'restart_registry_etsy_api_key', [
+            'sanitize_callback' => 'sanitize_text_field',
+        ]);
+
         register_setting('restart_registry_settings', 'restart_registry_page_id');
         register_setting('restart_registry_settings', 'restart_registry_email_from');
         register_setting('restart_registry_settings', 'restart_registry_email_name');
@@ -153,6 +158,28 @@ class Restart_Registry_Admin {
                 'description' => __('This disclosure will be shown on registry pages to comply with FTC guidelines.', 'restart-registry'),
             )
         );
+
+        // ── Retailer API Keys section ─────────────────────────────────────────
+        add_settings_section(
+            'restart_registry_api_keys_section',
+            __('Retailer API Keys', 'restart-registry'),
+            array($this, 'api_keys_section_callback'),
+            'restart_registry_affiliates'
+        );
+
+        add_settings_field(
+            'restart_registry_etsy_api_key',
+            __('Etsy API Key', 'restart-registry'),
+            array($this, 'api_key_field_callback'),
+            'restart_registry_affiliates',
+            'restart_registry_api_keys_section',
+            array(
+                'label_for'   => 'restart_registry_etsy_api_key',
+                'description' => __('Enables reliable title, image, price, and description fetching for Etsy items. Bypasses Cloudflare bot-detection entirely.', 'restart-registry'),
+                'get_key_url' => 'https://www.etsy.com/developers/register',
+                'get_key_label' => __('Get your Etsy API key →', 'restart-registry'),
+            )
+        );
     }
 
     public function affiliate_section_callback() {
@@ -183,6 +210,39 @@ class Restart_Registry_Admin {
         <?php if (isset($args['description'])): ?>
             <p class="description"><?php echo esc_html($args['description']); ?></p>
         <?php endif;
+    }
+
+    public function api_keys_section_callback() {
+        echo '<p>' . __('API keys enable reliable product data fetching for retailers that block HTML scraping. When a key is present the API is used automatically — no scraper needed.', 'restart-registry') . '</p>';
+    }
+
+    public function api_key_field_callback($args) {
+        $value         = get_option($args['label_for'], '');
+        $is_configured = !empty($value);
+        ?>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <input type="text"
+                   id="<?php echo esc_attr($args['label_for']); ?>"
+                   name="<?php echo esc_attr($args['label_for']); ?>"
+                   value="<?php echo esc_attr($value); ?>"
+                   class="regular-text"
+                   autocomplete="off"
+                   placeholder="<?php esc_attr_e('Paste your API key here', 'restart-registry'); ?>">
+            <?php if ($is_configured): ?>
+                <span style="color:#46b450;font-weight:600">&#10003; <?php _e('Configured', 'restart-registry'); ?></span>
+            <?php else: ?>
+                <span style="color:#999"><?php _e('Not configured', 'restart-registry'); ?></span>
+            <?php endif; ?>
+        </div>
+        <?php if (!empty($args['description'])): ?>
+            <p class="description">
+                <?php echo esc_html($args['description']); ?>
+                <?php if (!empty($args['get_key_url'])): ?>
+                    &nbsp;<a href="<?php echo esc_url($args['get_key_url']); ?>" target="_blank" rel="noopener"><?php echo esc_html($args['get_key_label'] ?? 'Get API key →'); ?></a>
+                <?php endif; ?>
+            </p>
+        <?php endif; ?>
+        <?php
     }
 
     /** Create the "My Registry" page and redirect back to settings. */
