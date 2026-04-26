@@ -177,6 +177,15 @@ class Restart_Registry_Public {
 
     // =========================================================================
     // Private rendering helpers
+
+    /**
+     * Strip inter-tag whitespace so wpautop (which runs on the_content after
+     * do_blocks/do_shortcode assembles the output) cannot inject <br> or <p>
+     * tags between our table-row/table-cell elements.
+     */
+    private function compact_html(string $html): string {
+        return preg_replace('/>\s+</', '><', $html);
+    }
     // =========================================================================
 
     private function render_login_prompt(): string {
@@ -191,7 +200,7 @@ class Restart_Registry_Public {
             <?php endif; ?>
         </div>
         <?php
-        return ob_get_clean();
+        return $this->compact_html(ob_get_clean());
     }
 
     private function render_create_form(): string {
@@ -231,7 +240,7 @@ class Restart_Registry_Public {
             </form>
         </div>
         <?php
-        return ob_get_clean();
+        return $this->compact_html(ob_get_clean());
     }
 
     private function render_manage_registry(array $registry): string {
@@ -465,7 +474,7 @@ class Restart_Registry_Public {
 
         </div>
         <?php
-        return ob_get_clean();
+        return $this->compact_html(ob_get_clean());
     }
 
     /**
@@ -478,59 +487,41 @@ class Restart_Registry_Public {
         $is_fulfilled  = $remaining <= 0;
         $item_url      = !empty($item['affiliate_url']) ? $item['affiliate_url'] : ($item['url'] ?? '');
 
-        ob_start();
-        ?>
-        <li class="rr-item-row <?php echo $is_fulfilled ? 'rr-item-row--fulfilled' : ''; ?>"
-            data-item-id="<?php echo esc_attr($item['id']); ?>"
-            data-name="<?php echo esc_attr($item['name']); ?>"
-            data-url="<?php echo esc_attr($item['url'] ?? ''); ?>"
-            data-description="<?php echo esc_attr($item['description'] ?? ''); ?>"
-            data-price="<?php echo esc_attr($item['price'] ?? ''); ?>"
-            data-quantity="<?php echo esc_attr($item['quantity_needed'] ?? 1); ?>"
-            data-image-url="<?php echo esc_attr($item['image_url'] ?? ''); ?>">
+        $thumb = !empty($item['image_url'])
+            ? '<img src="' . esc_url($item['image_url']) . '" alt="' . esc_attr($item['name']) . '" loading="lazy">'
+            : '<span class="rr-item-row__thumb-placeholder" aria-hidden="true"></span>';
 
-            <span class="rr-item-row__thumb">
-                <?php if (!empty($item['image_url'])): ?>
-                    <img src="<?php echo esc_url($item['image_url']); ?>"
-                         alt="<?php echo esc_attr($item['name']); ?>"
-                         loading="lazy">
-                <?php else: ?>
-                    <span class="rr-item-row__thumb-placeholder" aria-hidden="true"></span>
-                <?php endif; ?>
-            </span>
+        $name_inner = !empty($item_url)
+            ? '<a href="' . esc_url($item_url) . '" target="_blank" rel="noopener sponsored">' . esc_html($item['name']) . '</a>'
+            : esc_html($item['name']);
+        if (!empty($item['retailer'])) {
+            $name_inner .= '<span class="rr-item-retailer">' . esc_html($item['retailer']) . '</span>';
+        }
+        if (!empty($item['description'])) {
+            $name_inner .= '<span class="rr-item-row__note">' . esc_html($item['description']) . '</span>';
+        }
 
-            <span class="rr-item-row__name">
-                <?php if (!empty($item_url)): ?>
-                    <a href="<?php echo esc_url($item_url); ?>" target="_blank" rel="noopener sponsored"><?php echo esc_html($item['name']); ?></a>
-                <?php else: ?>
-                    <?php echo esc_html($item['name']); ?>
-                <?php endif; ?>
-                <?php if (!empty($item['retailer'])): ?>
-                    <span class="rr-item-retailer"><?php echo esc_html($item['retailer']); ?></span>
-                <?php endif; ?>
-                <?php if (!empty($item['description'])): ?>
-                    <span class="rr-item-row__note"><?php echo esc_html($item['description']); ?></span>
-                <?php endif; ?>
-            </span>
+        $fulfilled_inner = $is_fulfilled
+            ? '<span class="rr-fulfilled-check" title="' . esc_attr__('Fulfilled', 'restart-registry') . '">&#10003;</span>'
+            : esc_html($qty_purchased . ' / ' . $qty_needed);
 
-            <span class="rr-item-row__qty-desired"><?php echo esc_html($qty_needed); ?></span>
-
-            <span class="rr-item-row__fulfilled <?php echo $is_fulfilled ? 'rr-item-row__fulfilled--done' : ''; ?>">
-                <?php if ($is_fulfilled): ?>
-                    <span class="rr-fulfilled-check" title="<?php esc_attr_e('Fulfilled', 'restart-registry'); ?>">&#10003;</span>
-                <?php else: ?>
-                    <?php echo esc_html($qty_purchased . ' / ' . $qty_needed); ?>
-                <?php endif; ?>
-            </span>
-
-            <span class="rr-item-row__actions">
-                <button type="button" class="rr-btn-icon rr-edit-item" title="<?php esc_attr_e('Edit', 'restart-registry'); ?>">&#9998;</button>
-                <button type="button" class="rr-btn-icon rr-btn-icon--danger rr-delete-item" title="<?php esc_attr_e('Remove', 'restart-registry'); ?>">&#10005;</button>
-            </span>
-
-        </li>
-        <?php
-        return ob_get_clean();
+        return '<li class="rr-item-row ' . ($is_fulfilled ? 'rr-item-row--fulfilled' : '') . '"'
+            . ' data-item-id="' . esc_attr($item['id']) . '"'
+            . ' data-name="' . esc_attr($item['name']) . '"'
+            . ' data-url="' . esc_attr($item['url'] ?? '') . '"'
+            . ' data-description="' . esc_attr($item['description'] ?? '') . '"'
+            . ' data-price="' . esc_attr($item['price'] ?? '') . '"'
+            . ' data-quantity="' . esc_attr($item['quantity_needed'] ?? 1) . '"'
+            . ' data-image-url="' . esc_attr($item['image_url'] ?? '') . '">'
+            . '<span class="rr-item-row__thumb">' . $thumb . '</span>'
+            . '<span class="rr-item-row__name">' . $name_inner . '</span>'
+            . '<span class="rr-item-row__qty-desired">' . esc_html($qty_needed) . '</span>'
+            . '<span class="rr-item-row__fulfilled ' . ($is_fulfilled ? 'rr-item-row__fulfilled--done' : '') . '">' . $fulfilled_inner . '</span>'
+            . '<span class="rr-item-row__actions">'
+            . '<button type="button" class="rr-btn-icon rr-edit-item" title="' . esc_attr__('Edit', 'restart-registry') . '">&#9998;</button>'
+            . '<button type="button" class="rr-btn-icon rr-btn-icon--danger rr-delete-item" title="' . esc_attr__('Remove', 'restart-registry') . '">&#10005;</button>'
+            . '</span>'
+            . '</li>';
     }
 
     /**
@@ -626,7 +617,7 @@ class Restart_Registry_Public {
 
         </div>
         <?php
-        return ob_get_clean();
+        return $this->compact_html(ob_get_clean());
     }
 
     /**
@@ -642,60 +633,42 @@ class Restart_Registry_Public {
         $is_fulfilled  = $remaining <= 0;
         $item_url      = !empty($item['affiliate_url']) ? $item['affiliate_url'] : ($item['url'] ?? '');
 
-        ob_start();
-        ?>
-        <div class="rr-item-card <?php echo $is_fulfilled ? 'rr-item-fulfilled' : ''; ?>"
-             data-item-id="<?php echo esc_attr($item['id']); ?>">
+        $thumb = !empty($item['image_url'])
+            ? '<img src="' . esc_url($item['image_url']) . '" alt="' . esc_attr($item['name']) . '" loading="lazy">'
+            : '<span class="rr-item-row__thumb-placeholder" aria-hidden="true"></span>';
 
-            <span class="rr-item-card__thumb">
-                <?php if (!empty($item['image_url'])): ?>
-                    <img src="<?php echo esc_url($item['image_url']); ?>"
-                         alt="<?php echo esc_attr($item['name']); ?>"
-                         loading="lazy">
-                <?php else: ?>
-                    <span class="rr-item-row__thumb-placeholder" aria-hidden="true"></span>
-                <?php endif; ?>
-            </span>
+        $name_inner = (!empty($item_url) && !$is_fulfilled)
+            ? '<a href="' . esc_url($item_url) . '" target="_blank" rel="noopener sponsored">' . esc_html($item['name']) . '</a>'
+            : esc_html($item['name']);
+        if (!empty($item['retailer'])) {
+            $name_inner .= '<span class="rr-item-retailer">' . esc_html($item['retailer']) . '</span>';
+        }
+        if (!empty($item['price'])) {
+            $name_inner .= '<span class="rr-item-price">$' . number_format((float) $item['price'], 2) . '</span>';
+        }
 
-            <span class="rr-item-card__name">
-                <?php if (!empty($item_url) && !$is_fulfilled): ?>
-                    <a href="<?php echo esc_url($item_url); ?>" target="_blank" rel="noopener sponsored"><?php echo esc_html($item['name']); ?></a>
-                <?php else: ?>
-                    <?php echo esc_html($item['name']); ?>
-                <?php endif; ?>
-                <?php if (!empty($item['retailer'])): ?>
-                    <span class="rr-item-retailer"><?php echo esc_html($item['retailer']); ?></span>
-                <?php endif; ?>
-                <?php if (!empty($item['price'])): ?>
-                    <span class="rr-item-price">$<?php echo number_format((float) $item['price'], 2); ?></span>
-                <?php endif; ?>
-            </span>
+        $fulfilled_inner = $is_fulfilled
+            ? '<span class="rr-fulfilled-check">&#10003; ' . esc_html__('Done', 'restart-registry') . '</span>'
+            : esc_html($qty_purchased . ' / ' . $qty_needed);
 
-            <span class="rr-item-card__qty"><?php echo esc_html($qty_needed); ?></span>
+        $actions = '';
+        if (!$is_fulfilled && !$is_owner && $can_purchase) {
+            $actions .= '<button type="button" class="rr-button rr-button-small rr-mark-purchased">'
+                . esc_html__('Mark Fulfilled', 'restart-registry') . '</button>';
+        }
+        if ($is_owner) {
+            $actions .= '<button type="button" class="rr-btn-icon rr-edit-item" title="' . esc_attr__('Edit', 'restart-registry') . '">&#9998;</button>'
+                . '<button type="button" class="rr-btn-icon rr-btn-icon--danger rr-delete-item" title="' . esc_attr__('Remove', 'restart-registry') . '">&#10005;</button>';
+        }
 
-            <span class="rr-item-card__fulfilled <?php echo $is_fulfilled ? 'rr-item-card__fulfilled--done' : ''; ?>">
-                <?php if ($is_fulfilled): ?>
-                    <span class="rr-fulfilled-check">&#10003; <?php _e('Done', 'restart-registry'); ?></span>
-                <?php else: ?>
-                    <?php echo esc_html($qty_purchased . ' / ' . $qty_needed); ?>
-                <?php endif; ?>
-            </span>
-
-            <span class="rr-item-card__actions">
-                <?php if (!$is_fulfilled && !$is_owner && $can_purchase): ?>
-                    <button type="button" class="rr-button rr-button-small rr-mark-purchased">
-                        <?php _e('Mark Fulfilled', 'restart-registry'); ?>
-                    </button>
-                <?php endif; ?>
-                <?php if ($is_owner): ?>
-                    <button type="button" class="rr-btn-icon rr-edit-item" title="<?php esc_attr_e('Edit', 'restart-registry'); ?>">&#9998;</button>
-                    <button type="button" class="rr-btn-icon rr-btn-icon--danger rr-delete-item" title="<?php esc_attr_e('Remove', 'restart-registry'); ?>">&#10005;</button>
-                <?php endif; ?>
-            </span>
-
-        </div>
-        <?php
-        return ob_get_clean();
+        return '<div class="rr-item-card ' . ($is_fulfilled ? 'rr-item-fulfilled' : '') . '"'
+            . ' data-item-id="' . esc_attr($item['id']) . '">'
+            . '<span class="rr-item-card__thumb">' . $thumb . '</span>'
+            . '<span class="rr-item-card__name">' . $name_inner . '</span>'
+            . '<span class="rr-item-card__qty">' . esc_html($qty_needed) . '</span>'
+            . '<span class="rr-item-card__fulfilled ' . ($is_fulfilled ? 'rr-item-card__fulfilled--done' : '') . '">' . $fulfilled_inner . '</span>'
+            . '<span class="rr-item-card__actions">' . $actions . '</span>'
+            . '</div>';
     }
 
     // =========================================================================
