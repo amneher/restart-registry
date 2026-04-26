@@ -181,9 +181,10 @@
                 data: { action: 'restart_registry_fetch_url', nonce: restartRegistry.nonce, url: url },
                 success: function(response) {
                     if (response.success) {
-                        if (response.data.name)      $('#rr-item-name').val(response.data.name);
-                        if (response.data.price)     $('#rr-item-price').val(response.data.price);
-                        if (response.data.image_url) $('#rr-item-image-url').val(response.data.image_url);
+                        if (response.data.name)        $('#rr-item-name').val(response.data.name);
+                        if (response.data.price)       $('#rr-item-price').val(response.data.price);
+                        if (response.data.image_url)   $('#rr-item-image-url').val(response.data.image_url);
+                        if (response.data.description) $('#rr-item-description').val(response.data.description);
                         $('#rr-item-name').focus();
                     }
                     $button.prop('disabled', false).text('Fetch');
@@ -328,11 +329,70 @@
             });
         });
 
+        // ── Item detail modal ────────────────────────────────────────────────
+        $(document).on('click', '.rr-item-name-btn', function() {
+            var $row         = $(this).closest('.rr-item-row, .rr-item-card');
+            var name         = $row.data('name');
+            var imageUrl     = $row.data('image-url');
+            var retailer     = $row.data('retailer');
+            var price        = $row.data('price');
+            var description  = $row.data('description');
+            var qtyNeeded    = $row.data('quantity') || 1;
+            var qtyPurchased = $row.data('qty-purchased') || 0;
+            var affiliateUrl = $row.data('affiliate-url');
+            var isFulfilled  = $row.hasClass('rr-item-row--fulfilled') || $row.hasClass('rr-item-fulfilled');
+            var isGuestView  = $row.closest('.rr-view-registry').length > 0;
+            var $modal       = $('#rr-item-detail-modal');
+
+            $modal.find('.rr-item-detail__title').text(name);
+
+            if (imageUrl) {
+                $modal.find('.rr-item-detail__image').attr({ src: imageUrl, alt: name });
+                $modal.find('.rr-item-detail__image-wrap').show();
+            } else {
+                $modal.find('.rr-item-detail__image-wrap').hide();
+            }
+
+            var meta = '';
+            if (retailer) meta += '<span class="rr-item-retailer">' + $('<span>').text(retailer).html() + '</span>';
+            if (price)    meta += '<span class="rr-item-price rr-item-detail__price">$' + parseFloat(price).toFixed(2) + '</span>';
+            $modal.find('.rr-item-detail__meta').html(meta);
+
+            if (description) {
+                $modal.find('.rr-item-detail__description').text(description).show();
+            } else {
+                $modal.find('.rr-item-detail__description').hide();
+            }
+
+            var remaining = parseInt(qtyNeeded) - parseInt(qtyPurchased);
+            $modal.find('.rr-item-detail__qty-row').html(
+                '<span class="rr-item-detail__qty-label">Needed</span> <strong>' + qtyNeeded + '</strong>'
+                + ' &nbsp;&middot;&nbsp; '
+                + '<span class="rr-item-detail__qty-label">Purchased</span> <strong>' + qtyPurchased + '</strong>'
+                + (remaining > 0 ? ' &nbsp;&middot;&nbsp; <span class="rr-item-detail__qty-label">Remaining</span> <strong>' + remaining + '</strong>' : '')
+            );
+
+            if (affiliateUrl && !isFulfilled) {
+                $modal.find('.rr-item-detail__purchase-btn').attr('href', affiliateUrl).show();
+            } else {
+                $modal.find('.rr-item-detail__purchase-btn').hide();
+            }
+
+            if (isGuestView && !isFulfilled) {
+                $modal.find('.rr-item-detail__mark-btn').data('item-id', $row.data('item-id')).show();
+            } else {
+                $modal.find('.rr-item-detail__mark-btn').hide();
+            }
+
+            openModal('#rr-item-detail-modal');
+        });
+
         // ── Mark as purchased (guest view) ───────────────────────────────────
         $(document).on('click', '.rr-mark-purchased', function() {
-            var $card   = $(this).closest('.rr-item-card');
-            var itemId  = $card.data('item-id');
-            var $button = $(this);
+            var $btn    = $(this);
+            var $card   = $btn.closest('.rr-item-card');
+            var itemId  = $card.length ? $card.data('item-id') : $btn.data('item-id');
+            var $button = $btn;
             var name    = prompt('Your name (optional):') || '';
 
             $button.prop('disabled', true).text(restartRegistry.strings.loading);
@@ -350,16 +410,17 @@
                 },
                 success: function(response) {
                     if (response.success) {
+                        closeModal('#rr-item-detail-modal');
                         showNotice(response.data.message, 'success');
                         setTimeout(function() { window.location.reload(); }, 1500);
                     } else {
                         alert(response.data.message || restartRegistry.strings.error);
-                        $button.prop('disabled', false).text('Mark as Purchased');
+                        $button.prop('disabled', false).text('Mark Fulfilled');
                     }
                 },
                 error: function() {
                     alert(restartRegistry.strings.error);
-                    $button.prop('disabled', false).text('Mark as Purchased');
+                    $button.prop('disabled', false).text('Mark Fulfilled');
                 }
             });
         });

@@ -473,6 +473,29 @@ class Restart_Registry_Public {
                 </div>
             </div>
 
+            <!-- Item detail modal -->
+            <div class="rr-modal" id="rr-item-detail-modal" aria-hidden="true">
+                <div class="rr-modal__backdrop"></div>
+                <div class="rr-modal__dialog" role="dialog" aria-labelledby="rr-item-detail-title" aria-modal="true">
+                    <div class="rr-modal__header">
+                        <h3 id="rr-item-detail-title" class="rr-item-detail__title"></h3>
+                        <button type="button" class="rr-modal__close" aria-label="<?php esc_attr_e('Close', 'restart-registry'); ?>">&times;</button>
+                    </div>
+                    <div class="rr-modal__body">
+                        <div class="rr-item-detail__image-wrap" style="display:none">
+                            <img class="rr-item-detail__image" src="" alt="" loading="lazy">
+                        </div>
+                        <div class="rr-item-detail__meta"></div>
+                        <p class="rr-item-detail__description" style="display:none"></p>
+                        <div class="rr-item-detail__qty-row"></div>
+                        <div class="rr-item-detail__actions">
+                            <a href="#" target="_blank" rel="noopener sponsored" class="rr-button rr-purchase-btn rr-item-detail__purchase-btn" style="display:none"><?php _e('Purchase', 'restart-registry'); ?></a>
+                            <button type="button" class="rr-button rr-button-small rr-button-secondary rr-mark-purchased rr-item-detail__mark-btn" style="display:none"><?php _e('Mark Fulfilled', 'restart-registry'); ?></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
         <?php
         return $this->compact_html(ob_get_clean());
@@ -492,9 +515,7 @@ class Restart_Registry_Public {
             ? '<img src="' . esc_url($item['image_url']) . '" alt="' . esc_attr($item['name']) . '" loading="lazy">'
             : '<span class="rr-item-row__thumb-placeholder" aria-hidden="true"></span>';
 
-        $name_inner = !empty($item_url)
-            ? '<a href="' . esc_url($item_url) . '" target="_blank" rel="noopener sponsored">' . esc_html($item['name']) . '</a>'
-            : esc_html($item['name']);
+        $name_inner = '<button type="button" class="rr-item-name-btn">' . esc_html($item['name']) . '</button>';
         if (!empty($item['retailer'])) {
             $name_inner .= '<span class="rr-item-retailer">' . esc_html($item['retailer']) . '</span>';
         }
@@ -513,12 +534,16 @@ class Restart_Registry_Public {
             . ' data-description="' . esc_attr($item['description'] ?? '') . '"'
             . ' data-price="' . esc_attr($item['price'] ?? '') . '"'
             . ' data-quantity="' . esc_attr($item['quantity_needed'] ?? 1) . '"'
-            . ' data-image-url="' . esc_attr($item['image_url'] ?? '') . '">'
+            . ' data-image-url="' . esc_attr($item['image_url'] ?? '') . '"'
+            . ' data-retailer="' . esc_attr($item['retailer'] ?? '') . '"'
+            . ' data-affiliate-url="' . esc_attr($item_url) . '"'
+            . ' data-qty-purchased="' . esc_attr($qty_purchased) . '">'
             . '<span class="rr-item-row__thumb">' . $thumb . '</span>'
             . '<span class="rr-item-row__name">' . $name_inner . '</span>'
             . '<span class="rr-item-row__qty-desired">' . esc_html($qty_needed) . '</span>'
             . '<span class="rr-item-row__fulfilled ' . ($is_fulfilled ? 'rr-item-row__fulfilled--done' : '') . '">' . $fulfilled_inner . '</span>'
             . '<span class="rr-item-row__actions">'
+            . (!empty($item_url) ? '<a href="' . esc_url($item_url) . '" target="_blank" rel="noopener sponsored" class="rr-purchase-btn rr-button rr-button-small">' . esc_html__('Purchase', 'restart-registry') . '</a>' : '')
             . '<button type="button" class="rr-btn-icon rr-edit-item" title="' . esc_attr__('Edit', 'restart-registry') . '">&#9998;</button>'
             . '<button type="button" class="rr-btn-icon rr-btn-icon--danger rr-delete-item" title="' . esc_attr__('Remove', 'restart-registry') . '">&#10005;</button>'
             . '</span>'
@@ -615,6 +640,29 @@ class Restart_Registry_Public {
                 <?php endif; ?>
             </div>
 
+            <!-- Item detail modal -->
+            <div class="rr-modal" id="rr-item-detail-modal" aria-hidden="true">
+                <div class="rr-modal__backdrop"></div>
+                <div class="rr-modal__dialog" role="dialog" aria-labelledby="rr-item-detail-title" aria-modal="true">
+                    <div class="rr-modal__header">
+                        <h3 id="rr-item-detail-title" class="rr-item-detail__title"></h3>
+                        <button type="button" class="rr-modal__close" aria-label="<?php esc_attr_e('Close', 'restart-registry'); ?>">&times;</button>
+                    </div>
+                    <div class="rr-modal__body">
+                        <div class="rr-item-detail__image-wrap" style="display:none">
+                            <img class="rr-item-detail__image" src="" alt="" loading="lazy">
+                        </div>
+                        <div class="rr-item-detail__meta"></div>
+                        <p class="rr-item-detail__description" style="display:none"></p>
+                        <div class="rr-item-detail__qty-row"></div>
+                        <div class="rr-item-detail__actions">
+                            <a href="#" target="_blank" rel="noopener sponsored" class="rr-button rr-purchase-btn rr-item-detail__purchase-btn" style="display:none"><?php _e('Purchase', 'restart-registry'); ?></a>
+                            <button type="button" class="rr-button rr-button-small rr-button-secondary rr-mark-purchased rr-item-detail__mark-btn" style="display:none"><?php _e('Mark Fulfilled', 'restart-registry'); ?></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
         <?php
         return $this->compact_html(ob_get_clean());
@@ -637,9 +685,7 @@ class Restart_Registry_Public {
             ? '<img src="' . esc_url($item['image_url']) . '" alt="' . esc_attr($item['name']) . '" loading="lazy">'
             : '<span class="rr-item-row__thumb-placeholder" aria-hidden="true"></span>';
 
-        $name_inner = (!empty($item_url) && !$is_fulfilled)
-            ? '<a href="' . esc_url($item_url) . '" target="_blank" rel="noopener sponsored">' . esc_html($item['name']) . '</a>'
-            : esc_html($item['name']);
+        $name_inner = '<button type="button" class="rr-item-name-btn">' . esc_html($item['name']) . '</button>';
         if (!empty($item['retailer'])) {
             $name_inner .= '<span class="rr-item-retailer">' . esc_html($item['retailer']) . '</span>';
         }
@@ -652,8 +698,12 @@ class Restart_Registry_Public {
             : esc_html($qty_purchased . ' / ' . $qty_needed);
 
         $actions = '';
+        if (!$is_fulfilled && !empty($item_url)) {
+            $actions .= '<a href="' . esc_url($item_url) . '" target="_blank" rel="noopener sponsored" class="rr-purchase-btn rr-button rr-button-small">'
+                . esc_html__('Purchase', 'restart-registry') . '</a>';
+        }
         if (!$is_fulfilled && !$is_owner && $can_purchase) {
-            $actions .= '<button type="button" class="rr-button rr-button-small rr-mark-purchased">'
+            $actions .= '<button type="button" class="rr-button rr-button-small rr-button-secondary rr-mark-purchased">'
                 . esc_html__('Mark Fulfilled', 'restart-registry') . '</button>';
         }
         if ($is_owner) {
@@ -662,7 +712,16 @@ class Restart_Registry_Public {
         }
 
         return '<div class="rr-item-card ' . ($is_fulfilled ? 'rr-item-fulfilled' : '') . '"'
-            . ' data-item-id="' . esc_attr($item['id']) . '">'
+            . ' data-item-id="' . esc_attr($item['id']) . '"'
+            . ' data-name="' . esc_attr($item['name']) . '"'
+            . ' data-url="' . esc_attr($item['url'] ?? '') . '"'
+            . ' data-description="' . esc_attr($item['description'] ?? '') . '"'
+            . ' data-price="' . esc_attr($item['price'] ?? '') . '"'
+            . ' data-quantity="' . esc_attr($qty_needed) . '"'
+            . ' data-image-url="' . esc_attr($item['image_url'] ?? '') . '"'
+            . ' data-retailer="' . esc_attr($item['retailer'] ?? '') . '"'
+            . ' data-affiliate-url="' . esc_attr($item_url) . '"'
+            . ' data-qty-purchased="' . esc_attr($qty_purchased) . '">'
             . '<span class="rr-item-card__thumb">' . $thumb . '</span>'
             . '<span class="rr-item-card__name">' . $name_inner . '</span>'
             . '<span class="rr-item-card__qty">' . esc_html($qty_needed) . '</span>'
@@ -870,8 +929,12 @@ class Restart_Registry_Public {
         }
 
         $response = wp_remote_get($url, [
-            'timeout'    => 10,
-            'user-agent' => 'Mozilla/5.0 (compatible; GiftRegistry/1.0)',
+            'timeout'    => 15,
+            'user-agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'headers'    => [
+                'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language' => 'en-US,en;q=0.5',
+            ],
         ]);
 
         if (is_wp_error($response)) {
@@ -881,7 +944,14 @@ class Restart_Registry_Public {
         $body = wp_remote_retrieve_body($response);
         $data = ['name' => '', 'price' => '', 'image_url' => ''];
 
-        if (preg_match('/<title[^>]*>([^<]+)<\/title>/i', $body, $m)) {
+        // og:title is the curated product name — preferred over <title> which adds site suffixes
+        if (preg_match('/<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\'][^>]*>/i', $body, $m) ||
+            preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\'][^>]*>/i', $body, $m)) {
+            $data['name'] = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
+            $data['name'] = preg_replace('/\s*[-|–]\s*(Etsy|Amazon\.com|Amazon|Target|Walmart|eBay)\s*$/iu', '', $data['name']);
+        }
+        // Fallback: <title> tag
+        if (empty($data['name']) && preg_match('/<title[^>]*>([^<]+)<\/title>/i', $body, $m)) {
             $data['name'] = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
             $data['name'] = preg_replace('/\s*[-|:].*(?:Amazon|Target|Walmart|eBay|Etsy).*$/i', '', $data['name']);
         }
@@ -914,6 +984,101 @@ class Restart_Registry_Public {
             if (preg_match('/"large":"(https:\/\/m\.media-amazon\.com\/images\/[^"]+)"/i', $body, $m)) {
                 $data['image_url'] = esc_url_raw($m[1]);
             }
+        }
+
+        // Etsy: Chrome UAs get Cloudflare-blocked; retry with a social crawler UA that Etsy allows for link previews.
+        // If we get a real page, replace $body so the description extraction below can reuse it.
+        if (strpos($url, 'etsy.com/listing/') !== false) {
+            $etsy_resp = wp_remote_get($url, [
+                'timeout'    => 10,
+                'user-agent' => 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+                'headers'    => [
+                    'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language' => 'en-US,en;q=0.5',
+                ],
+            ]);
+            if (!is_wp_error($etsy_resp)) {
+                $etsy_body    = wp_remote_retrieve_body($etsy_resp);
+                $etsy_og_title = '';
+                if (preg_match('/<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\'][^>]*>/i', $etsy_body, $m) ||
+                    preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\'][^>]*>/i', $etsy_body, $m)) {
+                    $etsy_og_title = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+                }
+                // Only trust the result if it's a real listing page, not a bot-detection shell
+                if ($etsy_og_title && !preg_match('/^etsy(\.com)?$/i', trim($etsy_og_title))) {
+                    $data['name'] = preg_replace('/\s*[-|–]\s*Etsy\s*$/iu', '', $etsy_og_title);
+                    if (preg_match('/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\'][^>]*>/i', $etsy_body, $m) ||
+                        preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\'][^>]*>/i', $etsy_body, $m)) {
+                        $data['image_url'] = esc_url_raw(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'));
+                    }
+                    // Replace $body so the description extraction section below uses the real page
+                    $body = $etsy_body;
+                }
+            }
+            // Name fallback: always use URL slug when name still looks like a bare domain
+            if (empty($data['name']) || preg_match('/^[\w.-]+\.\w{2,}$/', trim($data['name']))) {
+                if (preg_match('/etsy\.com\/listing\/\d+\/([^?&#]+)/i', $url, $m)) {
+                    $data['name'] = ucwords(str_replace('-', ' ', rawurldecode($m[1])));
+                }
+            }
+        }
+
+        // Description — Strategy 1: JSON-LD Product schema
+        $description = '';
+        if (preg_match_all('/<script[^>]+type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/is', $body, $ld_blocks)) {
+            foreach ($ld_blocks[1] as $json_raw) {
+                $ld = json_decode(trim($json_raw), true);
+                if (!$ld) continue;
+                foreach (isset($ld[0]) ? $ld : [$ld] as $node) {
+                    if (in_array($node['@type'] ?? '', ['Product', 'ItemPage'], true) && !empty($node['description'])) {
+                        $description = $node['description'];
+                        break 2;
+                    }
+                }
+            }
+        }
+
+        // Description — Strategy 2: og:description
+        if (empty($description)) {
+            if (preg_match('/<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\'][^>]*>/i', $body, $m) ||
+                preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:description["\'][^>]*>/i', $body, $m)) {
+                $description = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+            }
+        }
+
+        // Description — Strategy 3: meta description
+        if (empty($description)) {
+            if (preg_match('/<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\'][^>]*>/i', $body, $m) ||
+                preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']description["\'][^>]*>/i', $body, $m)) {
+                $description = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+            }
+        }
+
+        if (!empty($description)) {
+            $description = trim(html_entity_decode($description, ENT_QUOTES, 'UTF-8'));
+            // Strip leading "Retailer.com: " prefixes
+            $description = preg_replace('/^(Amazon\.com|Amazon|Target|Walmart\.com|Walmart|eBay|Etsy)\s*[:–—-]\s*/iu', '', $description);
+            // Strip trailing " - Retailer.com" suffixes
+            $description = preg_replace('/\s*[-–—|]\s*(Amazon\.com|Walmart\.com|Target\.com|Etsy|eBay)\s*$/iu', '', $description);
+            // Strip common retail noise
+            $description = preg_replace('/\s*(Free (shipping|returns?)|Ships free|Shop now|Buy now|Order now|In stock|Add to cart)[^.]*\.?\s*$/iu', '', $description);
+            $description = trim($description);
+            // Truncate: try to break at a sentence end within 160 chars
+            if (mb_strlen($description) > 160) {
+                $short    = mb_substr($description, 0, 160);
+                $last_end = max(
+                    (int) strrpos($short, '. '),
+                    (int) strrpos($short, '! '),
+                    (int) strrpos($short, '? ')
+                );
+                if ($last_end > 80) {
+                    $description = mb_substr($short, 0, $last_end + 1);
+                } else {
+                    $last_space  = (int) strrpos($short, ' ');
+                    $description = ($last_space > 80 ? mb_substr($short, 0, $last_space) : $short) . '…';
+                }
+            }
+            $data['description'] = trim($description);
         }
 
         require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-affiliate-converter.php';
