@@ -236,7 +236,7 @@ class Restart_Registry_Controller {
 
         $lambda_data = [
             'registry_id' => $registry_id,
-            'name'        => sanitize_text_field($data['name']),
+            'name'        => $this->truncate_name(sanitize_text_field($data['name'])),
             'url'         => $url,
             'price'       => !empty($data['price']) ? (float) $data['price'] : null,
         ];
@@ -282,7 +282,7 @@ class Restart_Registry_Controller {
      */
     public function update_item(int $item_id, array $data) {
         $update = [];
-        if (isset($data['name']))        $update['name']           = sanitize_text_field($data['name']);
+        if (isset($data['name']))        $update['name']           = $this->truncate_name(sanitize_text_field($data['name']));
         if (!empty($data['url']))        $update['url']            = esc_url_raw($data['url']);
         if (isset($data['description'])) $update['description']    = sanitize_textarea_field($data['description']);
         if (!empty($data['price']))      $update['price']          = max(0.01, (float) $data['price']);
@@ -421,6 +421,45 @@ class Restart_Registry_Controller {
         }
 
         return false;
+    }
+
+    /**
+     * Shorten a product name to at most 100 characters.
+     *
+     * Tries common product-name separators (` - `, ` | `, `: `) that divide the
+     * core product name from variant/spec detail before falling back to a
+     * word-boundary cut. Comma-space is tried last and only when the leading
+     * segment is at least 20 characters, to avoid splitting "Brand, Product".
+     */
+    private function truncate_name(string $name): string {
+        if (mb_strlen($name) <= 100) {
+            return $name;
+        }
+
+        // Separators that typically mark the end of the core product name
+        foreach ([' - ', ' | ', ': ', ' – ', ' — '] as $sep) {
+            $pos = mb_strpos($name, $sep);
+            if ($pos !== false && $pos >= 8) {
+                $candidate = mb_substr($name, 0, $pos);
+                if (mb_strlen($candidate) <= 100) {
+                    return $candidate;
+                }
+            }
+        }
+
+        // Comma-space: only when the leading segment is substantial
+        $comma_pos = mb_strpos($name, ', ');
+        if ($comma_pos !== false && $comma_pos >= 20) {
+            $candidate = mb_substr($name, 0, $comma_pos);
+            if (mb_strlen($candidate) <= 100) {
+                return $candidate;
+            }
+        }
+
+        // Word-boundary fallback
+        $truncated  = mb_substr($name, 0, 100);
+        $last_space = mb_strrpos($truncated, ' ');
+        return ($last_space > 50 ? mb_substr($truncated, 0, $last_space) : $truncated);
     }
 
     /**
