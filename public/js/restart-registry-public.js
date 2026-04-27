@@ -155,20 +155,20 @@
         });
 
         // ── Add item panel toggle ────────────────────────────────────────────
-        $('#rr-add-item-toggle').on('click', function() {
+        $(document).on('click', '#rr-add-item-toggle', function() {
             $('#rr-add-item-panel').slideDown(200);
             $(this).hide();
             $('#rr-item-url').focus();
         });
 
-        $('#rr-add-item-cancel').on('click', function() {
+        $(document).on('click', '#rr-add-item-cancel', function() {
             $('#rr-add-item-panel').slideUp(200);
             $('#rr-add-item-toggle').show();
             $('#rr-add-item-form')[0].reset();
         });
 
         // ── Fetch URL details ────────────────────────────────────────────────
-        $('#rr-fetch-url').on('click', function() {
+        $(document).on('click', '#rr-fetch-url', function() {
             var $button = $(this);
             var url = $('#rr-item-url').val();
             if (!url) return;
@@ -183,7 +183,7 @@
                     if (response.success) {
                         if (response.data.name)        $('#rr-item-name').val(response.data.name);
                         if (response.data.price)       $('#rr-item-price').val(response.data.price);
-                        if (response.data.image_url)   $('#rr-item-image-url').val(response.data.image_url);
+                        $('#rr-item-image-url').val(response.data.image_url || '');
                         if (response.data.description) $('#rr-item-description').val(response.data.description);
                         $('#rr-item-name').focus();
                     }
@@ -193,7 +193,7 @@
             });
         });
 
-        $('#rr-item-url').on('blur', function() {
+        $(document).on('blur', '#rr-item-url', function() {
             if ($(this).val() && !$('#rr-item-name').val()) {
                 $('#rr-fetch-url').trigger('click');
             }

@@ -858,6 +858,18 @@ class Restart_Registry_Public {
         $item_id  = (int) ($_POST['item_id']  ?? 0);
         $quantity = max(1, (int) ($_POST['quantity'] ?? 1));
 
+        // Verify the caller may view the registry that owns this item before
+        // mutating it. This matters for nopriv callers (anonymous guests) who
+        // should only be able to mark items in registries they can actually see.
+        $item = $this->controller->get_item($item_id);
+        if (!$item || is_wp_error($item)) {
+            wp_send_json_error(['message' => __('Item not found.', 'restart-registry')]);
+        }
+        $registry_id = (int) ($item['registry_id'] ?? 0);
+        if (!$registry_id || !$this->controller->can_view_registry($registry_id, get_current_user_id() ?: null)) {
+            wp_send_json_error(['message' => __('You do not have permission to view this registry.', 'restart-registry')]);
+        }
+
         $result = $this->controller->mark_item_purchased(
             $item_id,
             $quantity,

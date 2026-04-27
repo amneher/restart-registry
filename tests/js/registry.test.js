@@ -182,3 +182,56 @@ describe('item detail modal without image', () => {
         expect($('.rr-item-detail__image-wrap').css('display')).toBe('none');
     });
 });
+
+// ── URL fetch / stale image ───────────────────────────────────────────────────
+
+describe('URL fetch handler', () => {
+    function addFetchForm() {
+        document.body.innerHTML += `
+            <div class="rr-manage-registry" data-registry-id="1">
+                <input type="text" id="rr-item-url">
+                <button id="rr-fetch-url">Fetch</button>
+                <input type="text" id="rr-item-name">
+                <input type="text" id="rr-item-price">
+                <input type="hidden" id="rr-item-image-url" value="">
+                <textarea id="rr-item-description"></textarea>
+            </div>
+        `;
+    }
+
+    beforeEach(() => {
+        addFetchForm();
+        $('#rr-item-url').val('https://example.com/product');
+    });
+
+    it('populates image URL field when fetch returns an image', () => {
+        $.ajax.mockImplementationOnce(({ success }) => {
+            success({ success: true, data: { name: 'Widget', price: '9.99', image_url: 'https://cdn.example.com/img.jpg', description: 'Nice' } });
+        });
+        $('#rr-fetch-url').trigger('click');
+        expect($('#rr-item-image-url').val()).toBe('https://cdn.example.com/img.jpg');
+    });
+
+    it('clears image URL field when a subsequent fetch returns no image', () => {
+        // First fetch — sets an image
+        $.ajax.mockImplementationOnce(({ success }) => {
+            success({ success: true, data: { name: 'Widget', price: '9.99', image_url: 'https://cdn.example.com/img.jpg', description: '' } });
+        });
+        $('#rr-fetch-url').trigger('click');
+        expect($('#rr-item-image-url').val()).toBe('https://cdn.example.com/img.jpg');
+
+        // Second fetch — no image returned
+        $.ajax.mockImplementationOnce(({ success }) => {
+            success({ success: true, data: { name: 'Other Product', price: '19.99', image_url: '', description: '' } });
+        });
+        $('#rr-fetch-url').trigger('click');
+        expect($('#rr-item-image-url').val()).toBe('');
+    });
+
+    it('leaves image URL field unchanged when the fetch fails at the network level', () => {
+        $('#rr-item-image-url').val('https://cdn.example.com/existing.jpg');
+        $.ajax.mockImplementationOnce(({ error }) => { error(); });
+        $('#rr-fetch-url').trigger('click');
+        expect($('#rr-item-image-url').val()).toBe('https://cdn.example.com/existing.jpg');
+    });
+});
