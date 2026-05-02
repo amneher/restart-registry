@@ -1,0 +1,55 @@
+services:
+  nginx:
+    image: nginx:1.15.12-alpine
+    restart: unless-stopped
+    ports:
+      - "8083:80"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - wordpress:/var/www/html
+      - .:/var/www/html/wp-content/plugins/restart-registry:ro
+    networks:
+      - internal
+
+  database:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: wordpress
+      MYSQL_PASSWORD: wordpress
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_USER: wordpress
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      timeout: 20s
+      retries: 10
+    volumes:
+      - dbdata:/var/lib/mysql
+    networks:
+      - internal
+
+  wordpress:
+    depends_on:
+      database:
+        condition: service_healthy
+    image: wordpress:6.9.1-fpm-alpine
+    restart: unless-stopped
+    environment:
+      WORDPRESS_DB_HOST: database:3306
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WP_ENVIRONMENT_TYPE: local
+    volumes:
+      - wordpress:/var/www/html
+      - .:/var/www/html/wp-content/plugins/restart-registry:rw
+    networks:
+      - internal
+
+volumes:
+  dbdata:
+  wordpress:
+
+networks:
+  internal:
+    driver: bridge
