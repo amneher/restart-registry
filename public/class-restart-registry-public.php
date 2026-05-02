@@ -177,6 +177,15 @@ class Restart_Registry_Public {
 
     // =========================================================================
     // Private rendering helpers
+
+    /**
+     * Strip inter-tag whitespace so wpautop (which runs on the_content after
+     * do_blocks/do_shortcode assembles the output) cannot inject <br> or <p>
+     * tags between our table-row/table-cell elements.
+     */
+    private function compact_html(string $html): string {
+        return preg_replace('/>\s+</', '><', $html);
+    }
     // =========================================================================
 
     private function render_login_prompt(): string {
@@ -191,7 +200,7 @@ class Restart_Registry_Public {
             <?php endif; ?>
         </div>
         <?php
-        return ob_get_clean();
+        return $this->compact_html(ob_get_clean());
     }
 
     private function render_create_form(): string {
@@ -231,113 +240,314 @@ class Restart_Registry_Public {
             </form>
         </div>
         <?php
-        return ob_get_clean();
+        return $this->compact_html(ob_get_clean());
     }
 
     private function render_manage_registry(array $registry): string {
         $disclosure = get_option('restart_registry_affiliate_disclosure', __('Some links on this registry are affiliate links.', 'restart-registry'));
         $event_type = $registry['meta']['event_type'] ?? '';
         $event_date = $registry['meta']['event_date'] ?? '';
+        $hero_url   = get_the_post_thumbnail_url($registry['id'], 'large');
 
         ob_start();
         ?>
         <div class="rr-manage-registry" data-registry-id="<?php echo esc_attr($registry['id']); ?>">
 
+            <!-- Toolbar -->
+            <div class="rr-toolbar">
+                <label class="rr-toggle" title="<?php esc_attr_e('Toggle public / private', 'restart-registry'); ?>">
+                    <input type="checkbox" id="rr-public-toggle" <?php checked($registry['is_public']); ?>>
+                    <span class="rr-toggle__slider"></span>
+                    <span class="rr-toggle__label" data-on="<?php esc_attr_e('Public', 'restart-registry'); ?>" data-off="<?php esc_attr_e('Private', 'restart-registry'); ?>">
+                        <?php echo $registry['is_public'] ? __('Public', 'restart-registry') : __('Private', 'restart-registry'); ?>
+                    </span>
+                </label>
+                <button type="button" class="rr-btn-ghost" id="rr-share-toggle">&#8679; <?php _e('Share', 'restart-registry'); ?></button>
+                <button type="button" class="rr-btn-ghost" id="rr-edit-registry">&#9881; <?php _e('Settings', 'restart-registry'); ?></button>
+            </div>
+
+            <!-- Header: title + event meta -->
             <div class="rr-registry-header">
-                <h2><?php echo esc_html($registry['title']); ?></h2>
-                <?php if (!empty($registry['description'])): ?>
-                    <p class="rr-description"><?php echo esc_html($registry['description']); ?></p>
-                <?php endif; ?>
+                <h1 class="rr-registry-title"><?php echo esc_html($registry['title']); ?></h1>
                 <?php if ($event_type || $event_date): ?>
                     <p class="rr-event-meta">
                         <?php if ($event_type): ?><span class="rr-event-type"><?php echo esc_html($event_type); ?></span><?php endif; ?>
                         <?php if ($event_date): ?><span class="rr-event-date"><?php echo esc_html(date_i18n(get_option('date_format'), strtotime($event_date))); ?></span><?php endif; ?>
                     </p>
                 <?php endif; ?>
-                <div class="rr-registry-meta">
-                    <span class="rr-visibility <?php echo $registry['is_public'] ? 'public' : 'private'; ?>">
-                        <?php echo $registry['is_public'] ? __('Public', 'restart-registry') : __('Private', 'restart-registry'); ?>
-                    </span>
-                    <button type="button" class="rr-button rr-button-small" id="rr-edit-registry"><?php _e('Edit Settings', 'restart-registry'); ?></button>
-                </div>
             </div>
 
-            <div class="rr-share-section">
-                <h3><?php _e('Share Your Registry', 'restart-registry'); ?></h3>
-                <div class="rr-share-link">
-                    <input type="text" readonly value="<?php echo esc_url($registry['permalink']); ?>" id="rr-share-url">
-                    <button type="button" class="rr-button rr-button-small"
-                            onclick="navigator.clipboard.writeText(document.getElementById('rr-share-url').value);alert('<?php esc_attr_e('Link copied!', 'restart-registry'); ?>')">
-                        <?php _e('Copy', 'restart-registry'); ?>
-                    </button>
-                </div>
-                <div class="rr-invite-form">
-                    <h4><?php _e('Invite by Email or Username', 'restart-registry'); ?></h4>
-                    <form id="rr-send-invite-form">
-                        <input type="text" name="invitee"
-                               placeholder="<?php esc_attr_e('Email address or WP username', 'restart-registry'); ?>" required>
-                        <button type="submit" class="rr-button rr-button-small"><?php _e('Send Invite', 'restart-registry'); ?></button>
-                    </form>
-                </div>
-            </div>
-
-            <div class="rr-add-item-section">
-                <h3><?php _e('Add an Item', 'restart-registry'); ?></h3>
-                <form id="rr-add-item-form" class="rr-form">
-                    <div class="rr-form-row">
-                        <div class="rr-form-group rr-form-group-large">
-                            <label for="rr-item-url"><?php _e('Product URL', 'restart-registry'); ?></label>
-                            <input type="url" id="rr-item-url" name="url" required
-                                   placeholder="<?php esc_attr_e('Paste product link here…', 'restart-registry'); ?>">
-                            <button type="button" id="rr-fetch-url" class="rr-button rr-button-small"><?php _e('Fetch Details', 'restart-registry'); ?></button>
-                        </div>
-                    </div>
-                    <div class="rr-form-row">
-                        <div class="rr-form-group">
-                            <label for="rr-item-name"><?php _e('Product Name', 'restart-registry'); ?></label>
-                            <input type="text" id="rr-item-name" name="name" required>
-                        </div>
-                        <div class="rr-form-group rr-form-group-small">
-                            <label for="rr-item-quantity"><?php _e('Quantity', 'restart-registry'); ?></label>
-                            <input type="number" id="rr-item-quantity" name="quantity" min="1" value="1">
-                        </div>
-                    </div>
-                    <div class="rr-form-row">
-                        <div class="rr-form-group">
-                            <label for="rr-item-price"><?php _e('Price ($)', 'restart-registry'); ?></label>
-                            <input type="number" id="rr-item-price" name="price" step="0.01" min="0.01" required>
-                        </div>
-                    </div>
-                    <div class="rr-form-group">
-                        <label for="rr-item-description"><?php _e('Notes (optional)', 'restart-registry'); ?></label>
-                        <textarea id="rr-item-description" name="description" rows="2"></textarea>
-                    </div>
-                    <button type="submit" class="rr-button"><?php _e('Add to Registry', 'restart-registry'); ?></button>
-                </form>
-            </div>
-
-            <?php if (!empty($disclosure)): ?>
-                <div class="rr-affiliate-disclosure">
-                    <small><?php echo esc_html($disclosure); ?></small>
+            <?php if ($hero_url): ?>
+                <div class="rr-registry-hero">
+                    <img src="<?php echo esc_url($hero_url); ?>"
+                         alt="<?php echo esc_attr($registry['title']); ?>"
+                         loading="lazy">
                 </div>
             <?php endif; ?>
 
+            <?php if (!empty($registry['description'])): ?>
+                <section class="rr-story">
+                    <h2 class="rr-story__heading"><?php _e('My Story', 'restart-registry'); ?></h2>
+                    <p class="rr-story__text"><?php echo nl2br(esc_html($registry['description'])); ?></p>
+                </section>
+            <?php endif; ?>
+
+            <hr class="rr-divider">
+
+            <!-- Items section -->
             <div class="rr-items-section">
-                <h3><?php _e('Your Items', 'restart-registry'); ?> <span class="rr-item-count">(<?php echo count($registry['items']); ?>)</span></h3>
-                <div class="rr-items-grid" id="rr-items-container">
-                    <?php if (empty($registry['items'])): ?>
-                        <p class="rr-no-items"><?php _e('No items yet. Add your first item above!', 'restart-registry'); ?></p>
-                    <?php else: ?>
-                        <?php foreach ($registry['items'] as $item): ?>
-                            <?php echo $this->render_item_card($item, true); ?>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
+                <div class="rr-items-header">
+                    <span class="rr-items-heading"><?php _e('Your Items', 'restart-registry'); ?> <span class="rr-item-count">(<?php echo count($registry['items']); ?>)</span></span>
+                    <button type="button" class="rr-btn-add" id="rr-add-item-toggle">+ <?php _e('Add Item', 'restart-registry'); ?></button>
+                </div>
+
+                <!-- Add item form (hidden) -->
+                <div id="rr-add-item-panel" class="rr-add-item-panel" style="display:none">
+                    <form id="rr-add-item-form">
+                        <div class="rr-add-item-url-row">
+                            <input type="url" id="rr-item-url" name="url" required
+                                   placeholder="<?php esc_attr_e('Paste a product link…', 'restart-registry'); ?>">
+                            <button type="button" id="rr-fetch-url" class="rr-btn-ghost"><?php _e('Fetch', 'restart-registry'); ?></button>
+                        </div>
+                        <div class="rr-add-item-fields">
+                            <input type="text" id="rr-item-name" name="name" required
+                                   placeholder="<?php esc_attr_e('Item name', 'restart-registry'); ?>">
+                            <input type="number" id="rr-item-quantity" name="quantity" min="1" value="1"
+                                   title="<?php esc_attr_e('Quantity', 'restart-registry'); ?>">
+                            <input type="number" id="rr-item-price" name="price" step="0.01" min="0.01"
+                                   placeholder="<?php esc_attr_e('Price', 'restart-registry'); ?>">
+                            <input type="text" id="rr-item-description" name="description"
+                                   placeholder="<?php esc_attr_e('Notes (optional)', 'restart-registry'); ?>">
+                            <input type="hidden" id="rr-item-image-url" name="image_url">
+                            <button type="submit" class="rr-button"><?php _e('Add', 'restart-registry'); ?></button>
+                            <button type="button" class="rr-btn-ghost" id="rr-add-item-cancel"><?php _e('Cancel', 'restart-registry'); ?></button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Items table -->
+                <div class="rr-items-table">
+                    <div class="rr-items-table__head" aria-hidden="true">
+                        <span class="rr-col-thumb"></span>
+                        <span class="rr-col-item"><?php _e('Item', 'restart-registry'); ?></span>
+                        <span class="rr-col-qty"><?php _e('Qty Desired', 'restart-registry'); ?></span>
+                        <span class="rr-col-fulfilled"><?php _e('Fulfilled', 'restart-registry'); ?></span>
+                        <span class="rr-col-actions"></span>
+                    </div>
+                    <div id="rr-items-container">
+                        <?php if (!empty($registry['items'])): ?>
+                            <ul class="rr-item-list">
+                                <?php foreach ($registry['items'] as $item): ?>
+                                    <?php echo $this->render_item_row($item); ?>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <?php if (empty($registry['items'])): ?>
+                    <p class="rr-no-items"><?php _e('No items yet — add something you need to restart.', 'restart-registry'); ?></p>
+                <?php endif; ?>
+
+                <?php if (!empty($disclosure)): ?>
+                    <p class="rr-affiliate-note"><small><?php echo esc_html($disclosure); ?></small></p>
+                <?php endif; ?>
+            </div>
+
+            <!-- Share modal -->
+            <div class="rr-modal" id="rr-share-modal" aria-hidden="true">
+                <div class="rr-modal__backdrop"></div>
+                <div class="rr-modal__dialog" role="dialog" aria-labelledby="rr-share-modal-title" aria-modal="true">
+                    <div class="rr-modal__header">
+                        <h3 id="rr-share-modal-title"><?php _e('Share Your Registry', 'restart-registry'); ?></h3>
+                        <button type="button" class="rr-modal__close" aria-label="<?php esc_attr_e('Close', 'restart-registry'); ?>">&times;</button>
+                    </div>
+                    <div class="rr-modal__body">
+                        <p class="rr-modal__hint"><?php _e('Share this link with friends and family:', 'restart-registry'); ?></p>
+                        <div class="rr-share-link">
+                            <input type="text" readonly id="rr-share-url" value="<?php echo esc_url($registry['permalink']); ?>">
+                            <button type="button" class="rr-button rr-button-small" id="rr-copy-link"><?php _e('Copy', 'restart-registry'); ?></button>
+                        </div>
+                        <div class="rr-modal__divider"></div>
+                        <p class="rr-modal__hint"><?php _e('Or send a private invitation:', 'restart-registry'); ?></p>
+                        <form id="rr-send-invite-form" class="rr-invite-form__row">
+                            <input type="text" name="invitee" placeholder="<?php esc_attr_e('Email or username…', 'restart-registry'); ?>" required>
+                            <button type="submit" class="rr-button rr-button-small"><?php _e('Send Invite', 'restart-registry'); ?></button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Item edit modal -->
+            <div class="rr-modal" id="rr-item-edit-modal" aria-hidden="true">
+                <div class="rr-modal__backdrop"></div>
+                <div class="rr-modal__dialog" role="dialog" aria-labelledby="rr-item-edit-modal-title" aria-modal="true">
+                    <div class="rr-modal__header">
+                        <h3 id="rr-item-edit-modal-title"><?php _e('Edit Item', 'restart-registry'); ?></h3>
+                        <button type="button" class="rr-modal__close" aria-label="<?php esc_attr_e('Close', 'restart-registry'); ?>">&times;</button>
+                    </div>
+                    <div class="rr-modal__body">
+                        <form id="rr-edit-item-form" class="rr-form">
+                            <input type="hidden" name="item_id" id="rr-edit-item-id">
+                            <div class="rr-form-group">
+                                <label for="rr-edit-item-name"><?php _e('Name', 'restart-registry'); ?></label>
+                                <input type="text" id="rr-edit-item-name" name="name" required>
+                            </div>
+                            <div class="rr-form-group">
+                                <label for="rr-edit-item-url"><?php _e('URL', 'restart-registry'); ?></label>
+                                <input type="url" id="rr-edit-item-url" name="url" required>
+                            </div>
+                            <div class="rr-form-row">
+                                <div class="rr-form-group">
+                                    <label for="rr-edit-item-price"><?php _e('Price', 'restart-registry'); ?></label>
+                                    <input type="number" id="rr-edit-item-price" name="price" step="0.01" min="0.01"
+                                           placeholder="<?php esc_attr_e('Optional', 'restart-registry'); ?>">
+                                </div>
+                                <div class="rr-form-group">
+                                    <label for="rr-edit-item-quantity"><?php _e('Quantity needed', 'restart-registry'); ?></label>
+                                    <input type="number" id="rr-edit-item-quantity" name="quantity" min="1" value="1">
+                                </div>
+                            </div>
+                            <div class="rr-form-group">
+                                <label for="rr-edit-item-description"><?php _e('Notes', 'restart-registry'); ?></label>
+                                <input type="text" id="rr-edit-item-description" name="description"
+                                       placeholder="<?php esc_attr_e('Optional', 'restart-registry'); ?>">
+                            </div>
+                            <div class="rr-form-group">
+                                <label for="rr-edit-item-image-url"><?php _e('Image URL', 'restart-registry'); ?></label>
+                                <input type="url" id="rr-edit-item-image-url" name="image_url"
+                                       placeholder="<?php esc_attr_e('Optional', 'restart-registry'); ?>">
+                            </div>
+                            <div class="rr-form-actions">
+                                <button type="submit" class="rr-button"><?php _e('Save Changes', 'restart-registry'); ?></button>
+                                <button type="button" class="rr-btn-ghost rr-modal-cancel"><?php _e('Cancel', 'restart-registry'); ?></button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings modal -->
+            <div class="rr-modal" id="rr-settings-modal" aria-hidden="true">
+                <div class="rr-modal__backdrop"></div>
+                <div class="rr-modal__dialog" role="dialog" aria-labelledby="rr-settings-modal-title" aria-modal="true">
+                    <div class="rr-modal__header">
+                        <h3 id="rr-settings-modal-title"><?php _e('Registry Settings', 'restart-registry'); ?></h3>
+                        <button type="button" class="rr-modal__close" aria-label="<?php esc_attr_e('Close', 'restart-registry'); ?>">&times;</button>
+                    </div>
+                    <div class="rr-modal__body">
+                        <form id="rr-edit-registry-form" class="rr-form">
+                            <div class="rr-form-group">
+                                <label for="rr-edit-title"><?php _e('Title', 'restart-registry'); ?></label>
+                                <input type="text" id="rr-edit-title" name="title"
+                                       value="<?php echo esc_attr($registry['title']); ?>" required>
+                            </div>
+                            <div class="rr-form-group">
+                                <label for="rr-edit-description"><?php _e('Description', 'restart-registry'); ?></label>
+                                <textarea id="rr-edit-description" name="description" rows="3"><?php echo esc_textarea($registry['description']); ?></textarea>
+                            </div>
+                            <div class="rr-form-row">
+                                <div class="rr-form-group">
+                                    <label for="rr-edit-event-type"><?php _e('Event Type', 'restart-registry'); ?></label>
+                                    <input type="text" id="rr-edit-event-type" name="event_type"
+                                           value="<?php echo esc_attr($event_type); ?>"
+                                           placeholder="<?php esc_attr_e('e.g., Divorce, Fresh Start', 'restart-registry'); ?>">
+                                </div>
+                                <div class="rr-form-group">
+                                    <label for="rr-edit-event-date"><?php _e('Event Date', 'restart-registry'); ?></label>
+                                    <input type="date" id="rr-edit-event-date" name="event_date"
+                                           value="<?php echo esc_attr($event_date); ?>">
+                                </div>
+                            </div>
+                            <div class="rr-form-group">
+                                <label class="rr-checkbox-label">
+                                    <input type="checkbox" name="is_public" value="1" <?php checked($registry['is_public']); ?>>
+                                    <?php _e('Make this registry public', 'restart-registry'); ?>
+                                </label>
+                            </div>
+                            <div class="rr-form-actions">
+                                <button type="submit" class="rr-button"><?php _e('Save Changes', 'restart-registry'); ?></button>
+                                <button type="button" class="rr-btn-ghost rr-modal-cancel"><?php _e('Cancel', 'restart-registry'); ?></button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Item detail modal -->
+            <div class="rr-modal" id="rr-item-detail-modal" aria-hidden="true">
+                <div class="rr-modal__backdrop"></div>
+                <div class="rr-modal__dialog" role="dialog" aria-labelledby="rr-item-detail-title" aria-modal="true">
+                    <div class="rr-modal__header">
+                        <h3 id="rr-item-detail-title" class="rr-item-detail__title"></h3>
+                        <button type="button" class="rr-modal__close" aria-label="<?php esc_attr_e('Close', 'restart-registry'); ?>">&times;</button>
+                    </div>
+                    <div class="rr-modal__body">
+                        <div class="rr-item-detail__image-wrap" style="display:none">
+                            <img class="rr-item-detail__image" src="" alt="" loading="lazy">
+                        </div>
+                        <div class="rr-item-detail__meta"></div>
+                        <p class="rr-item-detail__description" style="display:none"></p>
+                        <div class="rr-item-detail__qty-row"></div>
+                        <div class="rr-item-detail__actions">
+                            <a href="#" target="_blank" rel="noopener sponsored" class="rr-button rr-purchase-btn rr-item-detail__purchase-btn" style="display:none"><?php _e('Purchase', 'restart-registry'); ?></a>
+                            <button type="button" class="rr-button rr-button-small rr-button-secondary rr-mark-purchased rr-item-detail__mark-btn" style="display:none"><?php _e('Mark Fulfilled', 'restart-registry'); ?></button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
         </div>
         <?php
-        return ob_get_clean();
+        return $this->compact_html(ob_get_clean());
+    }
+
+    /**
+     * Render a single item as a table row for the owner's manage view.
+     */
+    private function render_item_row(array $item): string {
+        $qty_needed    = (int) ($item['quantity_needed']    ?? 1);
+        $qty_purchased = (int) ($item['quantity_purchased'] ?? 0);
+        $remaining     = $qty_needed - $qty_purchased;
+        $is_fulfilled  = $remaining <= 0;
+        $item_url      = !empty($item['affiliate_url']) ? $item['affiliate_url'] : ($item['url'] ?? '');
+
+        $thumb = !empty($item['image_url'])
+            ? '<img src="' . esc_url($item['image_url']) . '" alt="' . esc_attr($item['name']) . '" loading="lazy">'
+            : '<span class="rr-item-row__thumb-placeholder" aria-hidden="true"></span>';
+
+        $name_inner = '<button type="button" class="rr-item-name-btn">' . esc_html($item['name']) . '</button>';
+        if (!empty($item['retailer'])) {
+            $name_inner .= '<span class="rr-item-retailer">' . esc_html($item['retailer']) . '</span>';
+        }
+        if (!empty($item['description'])) {
+            $name_inner .= '<span class="rr-item-row__note">' . esc_html($item['description']) . '</span>';
+        }
+
+        $fulfilled_inner = $is_fulfilled
+            ? '<span class="rr-fulfilled-check" title="' . esc_attr__('Fulfilled', 'restart-registry') . '">&#10003;</span>'
+            : esc_html($qty_purchased . ' / ' . $qty_needed);
+
+        return '<li class="rr-item-row ' . ($is_fulfilled ? 'rr-item-row--fulfilled' : '') . '"'
+            . ' data-item-id="' . esc_attr($item['id']) . '"'
+            . ' data-name="' . esc_attr($item['name']) . '"'
+            . ' data-url="' . esc_attr($item['url'] ?? '') . '"'
+            . ' data-description="' . esc_attr($item['description'] ?? '') . '"'
+            . ' data-price="' . esc_attr($item['price'] ?? '') . '"'
+            . ' data-quantity="' . esc_attr($item['quantity_needed'] ?? 1) . '"'
+            . ' data-image-url="' . esc_attr($item['image_url'] ?? '') . '"'
+            . ' data-retailer="' . esc_attr($item['retailer'] ?? '') . '"'
+            . ' data-affiliate-url="' . esc_attr($item_url) . '"'
+            . ' data-qty-purchased="' . esc_attr($qty_purchased) . '">'
+            . '<span class="rr-item-row__thumb">' . $thumb . '</span>'
+            . '<span class="rr-item-row__name">' . $name_inner . '</span>'
+            . '<span class="rr-item-row__qty-desired">' . esc_html($qty_needed) . '</span>'
+            . '<span class="rr-item-row__fulfilled ' . ($is_fulfilled ? 'rr-item-row__fulfilled--done' : '') . '">' . $fulfilled_inner . '</span>'
+            . '<span class="rr-item-row__actions">'
+            . (!empty($item_url) ? '<a href="' . esc_url($item_url) . '" target="_blank" rel="noopener sponsored" class="rr-purchase-btn rr-button rr-button-small">' . esc_html__('Purchase', 'restart-registry') . '</a>' : '')
+            . '<button type="button" class="rr-btn-icon rr-edit-item" title="' . esc_attr__('Edit', 'restart-registry') . '">&#9998;</button>'
+            . '<button type="button" class="rr-btn-icon rr-btn-icon--danger rr-delete-item" title="' . esc_attr__('Remove', 'restart-registry') . '">&#10005;</button>'
+            . '</span>'
+            . '</li>';
     }
 
     /**
@@ -366,51 +576,100 @@ class Restart_Registry_Public {
         $allow_guests = get_option('restart_registry_allow_guests', 1);
         $event_type   = $registry['meta']['event_type'] ?? '';
         $event_date   = $registry['meta']['event_date'] ?? '';
+        $hero_url     = get_the_post_thumbnail_url($registry['id'], 'large');
 
         ob_start();
         ?>
         <div class="rr-view-registry" data-registry-id="<?php echo esc_attr($registry['id']); ?>">
 
-            <div class="rr-registry-header">
-                <h2><?php echo esc_html($registry['title']); ?></h2>
-                <p class="rr-owner"><?php printf(__('A gift registry by %s', 'restart-registry'), esc_html($owner_name)); ?></p>
-                <?php if ($event_type || $event_date): ?>
-                    <p class="rr-event-meta">
-                        <?php if ($event_type): ?><span class="rr-event-type"><?php echo esc_html($event_type); ?></span><?php endif; ?>
-                        <?php if ($event_date): ?><span class="rr-event-date"><?php echo esc_html(date_i18n(get_option('date_format'), strtotime($event_date))); ?></span><?php endif; ?>
-                    </p>
-                <?php endif; ?>
-                <?php if (!empty($registry['description'])): ?>
-                    <p class="rr-description"><?php echo esc_html($registry['description']); ?></p>
+            <!-- Two-column header: story left, hero right -->
+            <div class="rr-registry-top <?php echo $hero_url ? 'rr-registry-top--with-hero' : ''; ?>">
+                <div class="rr-registry-top__info">
+                    <h1 class="rr-registry-title"><?php echo esc_html($registry['title']); ?></h1>
+                    <p class="rr-owner"><?php printf(
+                        /* translators: %s = owner display name */
+                        __('A gift registry by %s', 'restart-registry'),
+                        '<strong>' . esc_html($owner_name) . '</strong>'
+                    ); ?></p>
+                    <?php if ($event_type || $event_date): ?>
+                        <p class="rr-event-meta">
+                            <?php if ($event_type): ?><span class="rr-event-type"><?php echo esc_html($event_type); ?></span><?php endif; ?>
+                            <?php if ($event_date): ?><span class="rr-event-date"><?php echo esc_html(date_i18n(get_option('date_format'), strtotime($event_date))); ?></span><?php endif; ?>
+                        </p>
+                    <?php endif; ?>
+                    <?php if (!empty($registry['description'])): ?>
+                        <section class="rr-story">
+                            <h2 class="rr-story__heading"><?php _e('Their Story', 'restart-registry'); ?></h2>
+                            <p class="rr-story__text"><?php echo nl2br(esc_html($registry['description'])); ?></p>
+                        </section>
+                    <?php endif; ?>
+                </div>
+                <?php if ($hero_url): ?>
+                    <div class="rr-registry-top__hero">
+                        <img src="<?php echo esc_url($hero_url); ?>"
+                             alt="<?php echo esc_attr($registry['title']); ?>"
+                             loading="lazy">
+                    </div>
                 <?php endif; ?>
             </div>
 
-            <?php if (!empty($disclosure)): ?>
-                <div class="rr-affiliate-disclosure">
-                    <small><?php echo esc_html($disclosure); ?></small>
-                </div>
-            <?php endif; ?>
+            <hr class="rr-divider">
 
+            <!-- Items table -->
             <div class="rr-items-section">
-                <h3><?php _e('Gift Ideas', 'restart-registry'); ?> <span class="rr-item-count">(<?php echo count($registry['items']); ?>)</span></h3>
-                <div class="rr-items-grid" id="rr-items-container">
-                    <?php if (empty($registry['items'])): ?>
-                        <p class="rr-no-items"><?php _e('No items in this registry yet.', 'restart-registry'); ?></p>
-                    <?php else: ?>
+                <div class="rr-items-table">
+                    <div class="rr-items-table__head" aria-hidden="true">
+                        <span class="rr-col-thumb"></span>
+                        <span class="rr-col-item"><?php _e('Item', 'restart-registry'); ?></span>
+                        <span class="rr-col-qty"><?php _e('Qty', 'restart-registry'); ?></span>
+                        <span class="rr-col-fulfilled"><?php _e('Fulfilled', 'restart-registry'); ?></span>
+                        <span class="rr-col-actions"></span>
+                    </div>
+                    <div class="rr-items-grid" id="rr-items-container">
                         <?php foreach ($registry['items'] as $item): ?>
                             <?php echo $this->render_item_card($item, false, (bool) $allow_guests); ?>
                         <?php endforeach; ?>
-                    <?php endif; ?>
+                    </div>
+                </div>
+                <?php if (empty($registry['items'])): ?>
+                    <p class="rr-no-items"><?php _e('No items in this registry yet.', 'restart-registry'); ?></p>
+                <?php endif; ?>
+
+                <?php if (!empty($disclosure)): ?>
+                    <p class="rr-affiliate-note"><small><?php echo esc_html($disclosure); ?></small></p>
+                <?php endif; ?>
+            </div>
+
+            <!-- Item detail modal -->
+            <div class="rr-modal" id="rr-item-detail-modal" aria-hidden="true">
+                <div class="rr-modal__backdrop"></div>
+                <div class="rr-modal__dialog" role="dialog" aria-labelledby="rr-item-detail-title" aria-modal="true">
+                    <div class="rr-modal__header">
+                        <h3 id="rr-item-detail-title" class="rr-item-detail__title"></h3>
+                        <button type="button" class="rr-modal__close" aria-label="<?php esc_attr_e('Close', 'restart-registry'); ?>">&times;</button>
+                    </div>
+                    <div class="rr-modal__body">
+                        <div class="rr-item-detail__image-wrap" style="display:none">
+                            <img class="rr-item-detail__image" src="" alt="" loading="lazy">
+                        </div>
+                        <div class="rr-item-detail__meta"></div>
+                        <p class="rr-item-detail__description" style="display:none"></p>
+                        <div class="rr-item-detail__qty-row"></div>
+                        <div class="rr-item-detail__actions">
+                            <a href="#" target="_blank" rel="noopener sponsored" class="rr-button rr-purchase-btn rr-item-detail__purchase-btn" style="display:none"><?php _e('Purchase', 'restart-registry'); ?></a>
+                            <button type="button" class="rr-button rr-button-small rr-button-secondary rr-mark-purchased rr-item-detail__mark-btn" style="display:none"><?php _e('Mark Fulfilled', 'restart-registry'); ?></button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
         </div>
         <?php
-        return ob_get_clean();
+        return $this->compact_html(ob_get_clean());
     }
 
     /**
-     * Render a single item card.
+     * Render a single item row for the public registry view.
      *
      * Item fields (from Lambda): id, name, url, description, price,
      *   retailer, affiliate_status, quantity_needed, quantity_purchased, is_active.
@@ -420,59 +679,55 @@ class Restart_Registry_Public {
         $qty_purchased = (int) ($item['quantity_purchased'] ?? 0);
         $remaining     = $qty_needed - $qty_purchased;
         $is_fulfilled  = $remaining <= 0;
-        $is_affiliate  = !empty($item['affiliate_status']);
+        $item_url      = !empty($item['affiliate_url']) ? $item['affiliate_url'] : ($item['url'] ?? '');
 
-        ob_start();
-        ?>
-        <div class="rr-item-card <?php echo $is_fulfilled ? 'rr-item-fulfilled' : ''; ?>"
-             data-item-id="<?php echo esc_attr($item['id']); ?>">
-            <div class="rr-item-content">
-                <h4 class="rr-item-name"><?php echo esc_html($item['name']); ?></h4>
+        $thumb = !empty($item['image_url'])
+            ? '<img src="' . esc_url($item['image_url']) . '" alt="' . esc_attr($item['name']) . '" loading="lazy">'
+            : '<span class="rr-item-row__thumb-placeholder" aria-hidden="true"></span>';
 
-                <?php if (!empty($item['retailer'])): ?>
-                    <span class="rr-item-retailer"><?php echo esc_html($item['retailer']); ?></span>
-                <?php endif; ?>
+        $name_inner = '<button type="button" class="rr-item-name-btn">' . esc_html($item['name']) . '</button>';
+        if (!empty($item['retailer'])) {
+            $name_inner .= '<span class="rr-item-retailer">' . esc_html($item['retailer']) . '</span>';
+        }
+        if (!empty($item['price'])) {
+            $name_inner .= '<span class="rr-item-price">$' . number_format((float) $item['price'], 2) . '</span>';
+        }
 
-                <?php if (!empty($item['description'])): ?>
-                    <p class="rr-item-description"><?php echo esc_html($item['description']); ?></p>
-                <?php endif; ?>
+        $fulfilled_inner = $is_fulfilled
+            ? '<span class="rr-fulfilled-check">&#10003; ' . esc_html__('Done', 'restart-registry') . '</span>'
+            : esc_html($qty_purchased . ' / ' . $qty_needed);
 
-                <div class="rr-item-meta">
-                    <?php if (!empty($item['price'])): ?>
-                        <span class="rr-item-price">$<?php echo number_format((float) $item['price'], 2); ?></span>
-                    <?php endif; ?>
-                    <span class="rr-item-quantity">
-                        <?php if ($is_fulfilled): ?>
-                            <?php _e('Fully purchased!', 'restart-registry'); ?>
-                        <?php else: ?>
-                            <?php printf(__('%d of %d needed', 'restart-registry'), $remaining, $qty_needed); ?>
-                        <?php endif; ?>
-                    </span>
-                </div>
+        $actions = '';
+        if (!$is_fulfilled && !empty($item_url)) {
+            $actions .= '<a href="' . esc_url($item_url) . '" target="_blank" rel="noopener sponsored" class="rr-purchase-btn rr-button rr-button-small">'
+                . esc_html__('Purchase', 'restart-registry') . '</a>';
+        }
+        if (!$is_fulfilled && !$is_owner && $can_purchase) {
+            $actions .= '<button type="button" class="rr-button rr-button-small rr-button-secondary rr-mark-purchased">'
+                . esc_html__('Mark Fulfilled', 'restart-registry') . '</button>';
+        }
+        if ($is_owner) {
+            $actions .= '<button type="button" class="rr-btn-icon rr-edit-item" title="' . esc_attr__('Edit', 'restart-registry') . '">&#9998;</button>'
+                . '<button type="button" class="rr-btn-icon rr-btn-icon--danger rr-delete-item" title="' . esc_attr__('Remove', 'restart-registry') . '">&#10005;</button>';
+        }
 
-                <div class="rr-item-actions">
-                    <?php if (!$is_fulfilled): ?>
-                        <a href="<?php echo esc_url($item['url']); ?>" target="_blank" rel="noopener sponsored"
-                           class="rr-button rr-button-primary"><?php _e('Buy This Gift', 'restart-registry'); ?></a>
-                        <?php if (!$is_owner && $can_purchase): ?>
-                            <button type="button" class="rr-button rr-button-secondary rr-mark-purchased">
-                                <?php _e('Mark as Purchased', 'restart-registry'); ?>
-                            </button>
-                        <?php endif; ?>
-                    <?php endif; ?>
-                    <?php if ($is_owner): ?>
-                        <button type="button" class="rr-button rr-button-small rr-edit-item"><?php _e('Edit', 'restart-registry'); ?></button>
-                        <button type="button" class="rr-button rr-button-small rr-button-danger rr-delete-item"><?php _e('Remove', 'restart-registry'); ?></button>
-                    <?php endif; ?>
-                </div>
-
-                <?php if ($is_affiliate): ?>
-                    <div class="rr-affiliate-badge"><small><?php _e('Affiliate link', 'restart-registry'); ?></small></div>
-                <?php endif; ?>
-            </div>
-        </div>
-        <?php
-        return ob_get_clean();
+        return '<div class="rr-item-card ' . ($is_fulfilled ? 'rr-item-fulfilled' : '') . '"'
+            . ' data-item-id="' . esc_attr($item['id']) . '"'
+            . ' data-name="' . esc_attr($item['name']) . '"'
+            . ' data-url="' . esc_attr($item['url'] ?? '') . '"'
+            . ' data-description="' . esc_attr($item['description'] ?? '') . '"'
+            . ' data-price="' . esc_attr($item['price'] ?? '') . '"'
+            . ' data-quantity="' . esc_attr($qty_needed) . '"'
+            . ' data-image-url="' . esc_attr($item['image_url'] ?? '') . '"'
+            . ' data-retailer="' . esc_attr($item['retailer'] ?? '') . '"'
+            . ' data-affiliate-url="' . esc_attr($item_url) . '"'
+            . ' data-qty-purchased="' . esc_attr($qty_purchased) . '">'
+            . '<span class="rr-item-card__thumb">' . $thumb . '</span>'
+            . '<span class="rr-item-card__name">' . $name_inner . '</span>'
+            . '<span class="rr-item-card__qty">' . esc_html($qty_needed) . '</span>'
+            . '<span class="rr-item-card__fulfilled ' . ($is_fulfilled ? 'rr-item-card__fulfilled--done' : '') . '">' . $fulfilled_inner . '</span>'
+            . '<span class="rr-item-card__actions">' . $actions . '</span>'
+            . '</div>';
     }
 
     // =========================================================================
@@ -530,6 +785,7 @@ class Restart_Registry_Public {
             'description' => sanitize_textarea_field($_POST['description'] ?? ''),
             'price'       => isset($_POST['price']) ? (float) $_POST['price'] : 0.01,
             'quantity'    => isset($_POST['quantity']) ? (int) $_POST['quantity'] : 1,
+            'image_url'   => !empty($_POST['image_url']) ? esc_url_raw($_POST['image_url']) : null,
         ];
 
         if (empty($data['name']) || empty($data['url'])) {
@@ -546,7 +802,7 @@ class Restart_Registry_Public {
             'item_id'      => $result['id'],
             'is_affiliate' => $result['is_affiliate'],
             'retailer'     => $result['retailer'],
-            'html'         => $this->render_item_card($result['html_item'], true),
+            'html'         => $this->render_item_row($result['html_item']),
         ]);
     }
 
@@ -581,10 +837,12 @@ class Restart_Registry_Public {
         }
 
         $data = [];
-        if (isset($_POST['name']))        $data['name']        = $_POST['name'];
-        if (isset($_POST['description'])) $data['description'] = $_POST['description'];
+        if (isset($_POST['name']))        $data['name']        = sanitize_text_field($_POST['name']);
+        if (isset($_POST['url']))         $data['url']         = esc_url_raw($_POST['url']);
+        if (isset($_POST['description'])) $data['description'] = sanitize_textarea_field($_POST['description']);
         if (isset($_POST['quantity']))    $data['quantity']    = (int) $_POST['quantity'];
         if (isset($_POST['price']))       $data['price']       = (float) $_POST['price'];
+        if (isset($_POST['image_url']))   $data['image_url']   = esc_url_raw($_POST['image_url']);
 
         $result = $this->controller->update_item($item_id, $data);
         if (is_wp_error($result)) {
@@ -599,6 +857,18 @@ class Restart_Registry_Public {
 
         $item_id  = (int) ($_POST['item_id']  ?? 0);
         $quantity = max(1, (int) ($_POST['quantity'] ?? 1));
+
+        // Verify the caller may view the registry that owns this item before
+        // mutating it. This matters for nopriv callers (anonymous guests) who
+        // should only be able to mark items in registries they can actually see.
+        $item = $this->controller->get_item($item_id);
+        if (!$item || is_wp_error($item)) {
+            wp_send_json_error(['message' => __('Item not found.', 'restart-registry')]);
+        }
+        $registry_id = (int) ($item['registry_id'] ?? 0);
+        if (!$registry_id || !$this->controller->can_view_registry($registry_id, get_current_user_id() ?: null)) {
+            wp_send_json_error(['message' => __('You do not have permission to view this registry.', 'restart-registry')]);
+        }
 
         $result = $this->controller->mark_item_purchased(
             $item_id,
@@ -670,9 +940,26 @@ class Restart_Registry_Public {
             wp_send_json_error(['message' => __('Please enter a URL.', 'restart-registry')]);
         }
 
+        // Try a retailer API first when a key is configured — skips the scraper entirely
+        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-retailer-api.php';
+        $api_data = (new Restart_Registry_Retailer_API())->fetch_if_configured($url);
+        if ($api_data !== null) {
+            require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-affiliate-converter.php';
+            $aff = (new Restart_Registry_Affiliate_Converter())->convert_url($url);
+            wp_send_json_success(array_merge($api_data, [
+                'retailer'     => $aff['retailer'],
+                'is_affiliate' => $aff['is_affiliate'],
+            ]));
+            return;
+        }
+
         $response = wp_remote_get($url, [
-            'timeout'    => 10,
-            'user-agent' => 'Mozilla/5.0 (compatible; GiftRegistry/1.0)',
+            'timeout'    => 15,
+            'user-agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'headers'    => [
+                'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language' => 'en-US,en;q=0.5',
+            ],
         ]);
 
         if (is_wp_error($response)) {
@@ -680,14 +967,143 @@ class Restart_Registry_Public {
         }
 
         $body = wp_remote_retrieve_body($response);
-        $data = ['name' => '', 'price' => ''];
+        $data = ['name' => '', 'price' => '', 'image_url' => ''];
 
-        if (preg_match('/<title[^>]*>([^<]+)<\/title>/i', $body, $m)) {
+        // og:title is the curated product name — preferred over <title> which adds site suffixes
+        if (preg_match('/<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\'][^>]*>/i', $body, $m) ||
+            preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\'][^>]*>/i', $body, $m)) {
+            $data['name'] = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
+            $data['name'] = preg_replace('/\s*[-|–]\s*(Etsy|Amazon\.com|Amazon|Target|Walmart|eBay)\s*$/iu', '', $data['name']);
+        }
+        // Fallback: <title> tag
+        if (empty($data['name']) && preg_match('/<title[^>]*>([^<]+)<\/title>/i', $body, $m)) {
             $data['name'] = html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8');
             $data['name'] = preg_replace('/\s*[-|:].*(?:Amazon|Target|Walmart|eBay|Etsy).*$/i', '', $data['name']);
         }
         if (preg_match('/\$([0-9,]+\.?\d{0,2})/', $body, $m)) {
             $data['price'] = (float) str_replace(',', '', $m[1]);
+        }
+        // Strategy 1: og:image meta tag (attribute order varies)
+        if (preg_match('/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\'][^>]*>/i', $body, $m) ||
+            preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\'][^>]*>/i', $body, $m)) {
+            $data['image_url'] = esc_url_raw(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'));
+        }
+
+        // Strategy 2: JSON-LD Product schema
+        if (empty($data['image_url']) && preg_match_all('/<script[^>]+type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/is', $body, $scripts)) {
+            foreach ($scripts[1] as $json_raw) {
+                $ld = json_decode(trim($json_raw), true);
+                if (!$ld) continue;
+                foreach (isset($ld[0]) ? $ld : [$ld] as $node) {
+                    if (in_array($node['@type'] ?? '', ['Product', 'ItemPage'], true) && !empty($node['image'])) {
+                        $img = is_array($node['image']) ? reset($node['image']) : $node['image'];
+                        if (is_array($img)) $img = $img['url'] ?? '';
+                        if ($img) { $data['image_url'] = esc_url_raw($img); break 2; }
+                    }
+                }
+            }
+        }
+
+        // Strategy 3: Amazon — parse colorImages JSON from page HTML for real CDN URL
+        if (empty($data['image_url']) && strpos($url, 'amazon.') !== false) {
+            if (preg_match('/"large":"(https:\/\/m\.media-amazon\.com\/images\/[^"]+)"/i', $body, $m)) {
+                $data['image_url'] = esc_url_raw($m[1]);
+            }
+        }
+
+        // Etsy: Chrome UAs get Cloudflare-blocked; retry with a social crawler UA that Etsy allows for link previews.
+        // If we get a real page, replace $body so the description extraction below can reuse it.
+        if (strpos($url, 'etsy.com/listing/') !== false) {
+            $etsy_resp = wp_remote_get($url, [
+                'timeout'    => 10,
+                'user-agent' => 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+                'headers'    => [
+                    'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language' => 'en-US,en;q=0.5',
+                ],
+            ]);
+            if (!is_wp_error($etsy_resp)) {
+                $etsy_body    = wp_remote_retrieve_body($etsy_resp);
+                $etsy_og_title = '';
+                if (preg_match('/<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\'][^>]*>/i', $etsy_body, $m) ||
+                    preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\'][^>]*>/i', $etsy_body, $m)) {
+                    $etsy_og_title = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+                }
+                // Only trust the result if it's a real listing page, not a bot-detection shell
+                if ($etsy_og_title && !preg_match('/^etsy(\.com)?$/i', trim($etsy_og_title))) {
+                    $data['name'] = preg_replace('/\s*[-|–]\s*Etsy\s*$/iu', '', $etsy_og_title);
+                    if (preg_match('/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\'][^>]*>/i', $etsy_body, $m) ||
+                        preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\'][^>]*>/i', $etsy_body, $m)) {
+                        $data['image_url'] = esc_url_raw(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'));
+                    }
+                    // Replace $body so the description extraction section below uses the real page
+                    $body = $etsy_body;
+                }
+            }
+            // Name fallback: always use URL slug when name still looks like a bare domain
+            if (empty($data['name']) || preg_match('/^[\w.-]+\.\w{2,}$/', trim($data['name']))) {
+                if (preg_match('/etsy\.com\/listing\/\d+\/([^?&#]+)/i', $url, $m)) {
+                    $data['name'] = ucwords(str_replace('-', ' ', rawurldecode($m[1])));
+                }
+            }
+        }
+
+        // Description — Strategy 1: JSON-LD Product schema
+        $description = '';
+        if (preg_match_all('/<script[^>]+type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/is', $body, $ld_blocks)) {
+            foreach ($ld_blocks[1] as $json_raw) {
+                $ld = json_decode(trim($json_raw), true);
+                if (!$ld) continue;
+                foreach (isset($ld[0]) ? $ld : [$ld] as $node) {
+                    if (in_array($node['@type'] ?? '', ['Product', 'ItemPage'], true) && !empty($node['description'])) {
+                        $description = $node['description'];
+                        break 2;
+                    }
+                }
+            }
+        }
+
+        // Description — Strategy 2: og:description
+        if (empty($description)) {
+            if (preg_match('/<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\'][^>]*>/i', $body, $m) ||
+                preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:description["\'][^>]*>/i', $body, $m)) {
+                $description = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+            }
+        }
+
+        // Description — Strategy 3: meta description
+        if (empty($description)) {
+            if (preg_match('/<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\'][^>]*>/i', $body, $m) ||
+                preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']description["\'][^>]*>/i', $body, $m)) {
+                $description = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+            }
+        }
+
+        if (!empty($description)) {
+            $description = trim(html_entity_decode($description, ENT_QUOTES, 'UTF-8'));
+            // Strip leading "Retailer.com: " prefixes
+            $description = preg_replace('/^(Amazon\.com|Amazon|Target|Walmart\.com|Walmart|eBay|Etsy)\s*[:–—-]\s*/iu', '', $description);
+            // Strip trailing " - Retailer.com" suffixes
+            $description = preg_replace('/\s*[-–—|]\s*(Amazon\.com|Walmart\.com|Target\.com|Etsy|eBay)\s*$/iu', '', $description);
+            // Strip common retail noise
+            $description = preg_replace('/\s*(Free (shipping|returns?)|Ships free|Shop now|Buy now|Order now|In stock|Add to cart)[^.]*\.?\s*$/iu', '', $description);
+            $description = trim($description);
+            // Truncate: try to break at a sentence end within 160 chars
+            if (mb_strlen($description) > 160) {
+                $short    = mb_substr($description, 0, 160);
+                $last_end = max(
+                    (int) strrpos($short, '. '),
+                    (int) strrpos($short, '! '),
+                    (int) strrpos($short, '? ')
+                );
+                if ($last_end > 80) {
+                    $description = mb_substr($short, 0, $last_end + 1);
+                } else {
+                    $last_space  = (int) strrpos($short, ' ');
+                    $description = ($last_space > 80 ? mb_substr($short, 0, $last_space) : $short) . '…';
+                }
+            }
+            $data['description'] = trim($description);
         }
 
         require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-affiliate-converter.php';

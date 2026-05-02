@@ -235,9 +235,10 @@ class Restart_Registry_Controller {
         $affiliate_result = $this->affiliate_converter->convert_url($url);
 
         $lambda_data = [
-            'name'  => sanitize_text_field($data['name']),
-            'url'   => $affiliate_result['affiliate_url'] ?: $url,
-            'price' => !empty($data['price']) ? (float) $data['price'] : 0.01,
+            'registry_id' => $registry_id,
+            'name'        => $this->truncate_name(sanitize_text_field($data['name'])),
+            'url'         => $url,
+            'price'       => !empty($data['price']) ? (float) $data['price'] : null,
         ];
 
         if (!empty($data['description'])) {
@@ -246,11 +247,15 @@ class Restart_Registry_Controller {
         if ($affiliate_result['retailer']) {
             $lambda_data['retailer'] = $affiliate_result['retailer'];
         }
-        if ($affiliate_result['is_affiliate']) {
-            $lambda_data['affiliate_status'] = 'converted';
+        if ($affiliate_result['is_affiliate'] && !empty($affiliate_result['affiliate_url'])) {
+            $lambda_data['affiliate_url']    = $affiliate_result['affiliate_url'];
+            $lambda_data['affiliate_status'] = 'active';
         }
         if (!empty($data['quantity'])) {
             $lambda_data['quantity_needed'] = (int) $data['quantity'];
+        }
+        if (!empty($data['image_url'])) {
+            $lambda_data['image_url'] = esc_url_raw($data['image_url']);
         }
 
         $item = $this->lambda->create_item($lambda_data);
@@ -273,14 +278,16 @@ class Restart_Registry_Controller {
 
     /**
      * Update a Lambda item's editable fields.
-     * Accepted keys: name, description, price, quantity (→ quantity_needed).
+     * Accepted keys: name, url, description, price, quantity (→ quantity_needed).
      */
     public function update_item(int $item_id, array $data) {
         $update = [];
-        if (isset($data['name']))        $update['name']           = sanitize_text_field($data['name']);
+        if (isset($data['name']))        $update['name']           = $this->truncate_name(sanitize_text_field($data['name']));
+        if (!empty($data['url']))        $update['url']            = esc_url_raw($data['url']);
         if (isset($data['description'])) $update['description']    = sanitize_textarea_field($data['description']);
-        if (isset($data['price']))       $update['price']          = max(0.01, (float) $data['price']);
+        if (!empty($data['price']))      $update['price']          = max(0.01, (float) $data['price']);
         if (isset($data['quantity']))    $update['quantity_needed'] = max(1, (int) $data['quantity']);
+        if (isset($data['image_url']))   $update['image_url']      = !empty($data['image_url']) ? esc_url_raw($data['image_url']) : null;
 
         if (empty($update)) {
             return new WP_Error('no_data', __('No data to update.', 'restart-registry'));
@@ -414,6 +421,45 @@ class Restart_Registry_Controller {
         }
 
         return false;
+    }
+
+    /**
+     * Shorten a product name to at most 100 characters.
+     *
+     * Tries common product-name separators (` - `, ` | `, `: `) that divide the
+     * core product name from variant/spec detail before falling back to a
+     * word-boundary cut. Comma-space is tried last and only when the leading
+     * segment is at least 20 characters, to avoid splitting "Brand, Product".
+     */
+    private function truncate_name(string $name): string {
+        if (mb_strlen($name) <= 100) {
+            return $name;
+        }
+
+        // Separators that typically mark the end of the core product name
+        foreach ([' - ', ' | ', ': ', ' – ', ' — '] as $sep) {
+            $pos = mb_strpos($name, $sep);
+            if ($pos !== false && $pos >= 8) {
+                $candidate = mb_substr($name, 0, $pos);
+                if (mb_strlen($candidate) <= 100) {
+                    return $candidate;
+                }
+            }
+        }
+
+        // Comma-space: only when the leading segment is substantial
+        $comma_pos = mb_strpos($name, ', ');
+        if ($comma_pos !== false && $comma_pos >= 20) {
+            $candidate = mb_substr($name, 0, $comma_pos);
+            if (mb_strlen($candidate) <= 100) {
+                return $candidate;
+            }
+        }
+
+        // Word-boundary fallback
+        $truncated  = mb_substr($name, 0, 100);
+        $last_space = mb_strrpos($truncated, ' ');
+        return ($last_space > 50 ? mb_substr($truncated, 0, $last_space) : $truncated);
     }
 
     /**
