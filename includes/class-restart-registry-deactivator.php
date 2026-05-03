@@ -30,7 +30,22 @@ class Restart_Registry_Deactivator {
 	 * @since    1.0.0
 	 */
 	public static function deactivate() {
+		self::remove_mu_plugins();
 		remove_role('registry_user');
+	}
+
+	public static function remove_mu_plugins(): void {
+		$installed = get_option( 'restart_registry_mu_plugins', [] );
+		$dst_dir   = WP_CONTENT_DIR . '/mu-plugins/';
+
+		foreach ( $installed as $file ) {
+			$path = $dst_dir . $file;
+			if ( file_exists( $path ) ) {
+				unlink( $path );
+			}
+		}
+
+		delete_option( 'restart_registry_mu_plugins' );
 	}
 
 }

@@ -13,7 +13,28 @@ class Restart_Registry_Activator {
         self::register_registry_user_role();
         self::add_capabilities();
         self::create_pages();
+        self::install_mu_plugins();
         flush_rewrite_rules();
+    }
+
+    public static function install_mu_plugins(): void {
+        $src_dir = plugin_dir_path( dirname( __FILE__ ) ) . 'mu-plugins/';
+        $dst_dir = WP_CONTENT_DIR . '/mu-plugins/';
+
+        if ( ! is_dir( $dst_dir ) ) {
+            wp_mkdir_p( $dst_dir );
+        }
+
+        $files     = [ 'restart-registry-cpt.php', 'restart-auth.php' ];
+        $installed = [];
+
+        foreach ( $files as $file ) {
+            if ( copy( $src_dir . $file, $dst_dir . $file ) ) {
+                $installed[] = $file;
+            }
+        }
+
+        update_option( 'restart_registry_mu_plugins', $installed );
     }
 
     public static function register_registry_user_role(): void {
