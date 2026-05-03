@@ -11,30 +11,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install PHP dependencies (production only)
-        run: composer install --no-interaction --prefer-dist --no-dev
-
       - name: Build zip
         run: |
           VERSION="${{ github.event.release.tag_name }}"
           ZIP_NAME="restart-registry-${VERSION}.zip"
-          zip -r "$ZIP_NAME" . \
-            --exclude "*.git*" \
-            --exclude ".github/*" \
-            --exclude "tests/*" \
-            --exclude "docker/*" \
-            --exclude "docker-compose.yml" \
-            --exclude "composer.json" \
-            --exclude "composer.lock" \
-            --exclude "package.json" \
-            --exclude "package-lock.json" \
-            --exclude "jest.config.js" \
-            --exclude "phpunit.xml" \
-            --exclude ".gitignore" \
-            --exclude ".phpunit.result.cache" \
-            --exclude ".env" \
-            --exclude "node_modules/*" \
-            --exclude "*.DS_Store"
+          rsync -a --delete --exclude-from=.distignore . /tmp/restart-registry/
+          cd /tmp && zip -r "$GITHUB_WORKSPACE/$ZIP_NAME" restart-registry/
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
       - name: Upload to release
