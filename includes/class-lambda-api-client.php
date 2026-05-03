@@ -19,6 +19,9 @@ class Restart_Registry_Lambda_Client {
     /** @var int HTTP request timeout in seconds. */
     private $timeout = 10;
 
+    /** @var string|null API Gateway x-api-key value, or null if unconfigured. */
+    private $api_key;
+
     /** @var string|null Basic-auth credentials as "username:password", or null if unconfigured. */
     private $auth;
 
@@ -28,8 +31,10 @@ class Restart_Registry_Lambda_Client {
             '/'
         );
 
-        $username = get_option('restart_lambda_username', getenv('RESTART_LAMBDA_USERNAME') ?: '');
-        $password = get_option('restart_lambda_app_password', getenv('RESTART_LAMBDA_APP_PASSWORD') ?: '');
+        $this->api_key = get_option('restart_lambda_api_key') ?: getenv('RESTART_LAMBDA_API_KEY') ?: null;
+
+        $username = get_option('restart_lambda_username') ?: getenv('RESTART_LAMBDA_USERNAME') ?: '';
+        $password = get_option('restart_lambda_app_password') ?: getenv('RESTART_LAMBDA_APP_PASSWORD') ?: '';
         if ($username && $password) {
             $this->auth = base64_encode("{$username}:{$password}");
         }
@@ -127,6 +132,9 @@ class Restart_Registry_Lambda_Client {
         }
 
         $headers = ['Content-Type' => 'application/json'];
+        if ($this->api_key) {
+            $headers['x-api-key'] = $this->api_key;
+        }
         if ($this->auth) {
             $headers['Authorization'] = 'Basic ' . $this->auth;
         }

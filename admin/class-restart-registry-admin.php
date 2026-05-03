@@ -112,6 +112,9 @@ class Restart_Registry_Admin {
         register_setting('restart_registry_settings', 'restart_lambda_url', [
             'sanitize_callback' => 'esc_url_raw',
         ]);
+        register_setting('restart_registry_settings', 'restart_lambda_api_key', [
+            'sanitize_callback' => 'sanitize_text_field',
+        ]);
         register_setting('restart_registry_settings', 'restart_lambda_username');
         register_setting('restart_registry_settings', 'restart_lambda_app_password');
 
@@ -274,7 +277,18 @@ class Restart_Registry_Admin {
             wp_send_json_error(['message' => __('Lambda URL is not configured.', 'restart-registry')]);
         }
 
-        $response = wp_remote_get(rtrim($url, '/') . '/health', ['timeout' => 8]);
+        $api_key  = get_option('restart_lambda_api_key') ?: getenv('RESTART_LAMBDA_API_KEY') ?: '';
+        $username = get_option('restart_lambda_username') ?: getenv('RESTART_LAMBDA_USERNAME') ?: '';
+        $password = get_option('restart_lambda_app_password') ?: getenv('RESTART_LAMBDA_APP_PASSWORD') ?: '';
+        $headers  = [];
+        if ($api_key) {
+            $headers['x-api-key'] = $api_key;
+        }
+        if ($username && $password) {
+            $headers['Authorization'] = 'Basic ' . base64_encode("{$username}:{$password}");
+        }
+
+        $response = wp_remote_get(rtrim($url, '/') . '/health', ['timeout' => 8, 'headers' => $headers]);
 
         if (is_wp_error($response)) {
             wp_send_json_error(['message' => $response->get_error_message()]);
@@ -647,7 +661,21 @@ class Restart_Registry_Admin {
                     </tr>
                     <tr>
                         <th scope="row">
-                            <label for="restart_lambda_username"><?php _e('Lambda WP Username', 'restart-registry'); ?></label>
+                            <label for="restart_lambda_api_key"><?php _e('API Gateway Key', 'restart-registry'); ?></label>
+                        </th>
+                        <td>
+                            <input type="password"
+                                   id="restart_lambda_api_key"
+                                   name="restart_lambda_api_key"
+                                   value="<?php echo esc_attr(get_option('restart_lambda_api_key', '')); ?>"
+                                   class="regular-text"
+                                   autocomplete="new-password">
+                            <p class="description"><?php _e('API key from your API Gateway usage plan. Sent as x-api-key to authenticate at the gateway level.', 'restart-registry'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">
+                            <label for="restart_lambda_username"><?php _e('WP Username', 'restart-registry'); ?></label>
                         </th>
                         <td>
                             <input type="text"
@@ -656,12 +684,12 @@ class Restart_Registry_Admin {
                                    value="<?php echo esc_attr(get_option('restart_lambda_username', '')); ?>"
                                    class="regular-text"
                                    autocomplete="off">
-                            <p class="description"><?php _e('WordPress username the plugin uses to authenticate with Lambda.', 'restart-registry'); ?></p>
+                            <p class="description"><?php _e('WordPress username sent to Lambda so it can authenticate back to the WP REST API.', 'restart-registry'); ?></p>
                         </td>
                     </tr>
                     <tr>
                         <th scope="row">
-                            <label for="restart_lambda_app_password"><?php _e('Lambda Application Password', 'restart-registry'); ?></label>
+                            <label for="restart_lambda_app_password"><?php _e('WP Application Password', 'restart-registry'); ?></label>
                         </th>
                         <td>
                             <input type="password"
@@ -670,7 +698,7 @@ class Restart_Registry_Admin {
                                    value="<?php echo esc_attr(get_option('restart_lambda_app_password', '')); ?>"
                                    class="regular-text"
                                    autocomplete="new-password">
-                            <p class="description"><?php _e('WP Application Password for the username above. Generate one under Users → Profile → Application Passwords.', 'restart-registry'); ?></p>
+                            <p class="description"><?php _e('Application Password for the username above. Generate one under Users → Profile → Application Passwords.', 'restart-registry'); ?></p>
                         </td>
                     </tr>
                     <tr>
