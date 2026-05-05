@@ -313,7 +313,7 @@ class Restart_Registry_Controller {
      * Increment quantity_purchased for an item.
      * Returns the updated item or WP_Error.
      */
-    public function mark_item_purchased(int $item_id, int $quantity = 1, string $purchaser_name = '', string $purchaser_email = '', bool $is_anonymous = false) {
+    public function mark_item_purchased(int $item_id, int $quantity = 1, string $purchaser_name = '', string $purchaser_email = '', string $purchaser_note = '', bool $is_anonymous = false) {
         $item = $this->lambda->get_item($item_id);
         if (!$item || is_wp_error($item)) {
             return new WP_Error('not_found', __('Item not found.', 'restart-registry'));
@@ -327,7 +327,11 @@ class Restart_Registry_Controller {
             return new WP_Error('quantity_exceeded', __('Cannot purchase more than needed.', 'restart-registry'));
         }
 
-        return $this->lambda->update_item($item_id, ['quantity_purchased' => $current + $quantity]);
+        $result = $this->lambda->update_item($item_id, ['quantity_purchased' => $current + $quantity]);
+        if (!is_wp_error($result)) {
+            $this->send_purchase_notification($item, $purchaser_name, $purchaser_note);
+        }
+        return $result;
     }
 
     // =========================================================================
@@ -364,6 +368,79 @@ class Restart_Registry_Controller {
             fn($invitee, $i) => ['id' => $i, 'email' => $invitee],
             $invitees,
             array_keys($invitees)
+        );
+    }
+
+    private function send_purchase_notification(array $item, string $purchaser_name, string $purchaser_note): void {
+        $registry_id = (int) ($item['registry_id'] ?? 0);
+        if (!$registry_id) return;
+
+        $post = get_post($registry_id);
+        if (!$post) return;
+
+        $owner_id = (int) $post->post_author;
+        $owner    = get_userdata($owner_id);
+        if (!$owner) return;
+
+        // Respect opt-out (default: notify)
+        if (get_user_meta($owner_id, 'restart_notify_on_purchase', true) === '0') return;
+
+        $registry_title = $post->post_title;
+        $registry_url   = get_permalink($registry_id) ?: home_url('/');
+        $item_name      = $item['name'] ?? __('an item', 'restart-registry');
+        $from_email     = get_option('restart_registry_email_from', get_option('admin_email'));
+        $from_name      = get_option('restart_registry_email_name', get_bloginfo('name'));
+
+        $display_name = $purchaser_name ?: __('Someone', 'restart-registry');
+
+        $subject = sprintf(
+            /* translators: 1: purchaser name or "Someone", 2: item name */
+            __('%1$s just purchased "%2$s" from your registry!', 'restart-registry'),
+            $display_name,
+            $item_name
+        );
+
+        $lines = [
+            sprintf(__('Hi %s,', 'restart-registry'), $owner->display_name),
+            '',
+            sprintf(
+                /* translators: 1: purchaser name or "Someone", 2: registry title */
+                __('Great news — %1$s just marked a gift as purchased from your registry "%2$s".', 'restart-registry'),
+                $display_name,
+                $registry_title
+            ),
+            '',
+            sprintf(__('Gift purchased: %s', 'restart-registry'), $item_name),
+        ];
+
+        if ($purchaser_name) {
+            $lines[] = sprintf(__('From: %s', 'restart-registry'), $purchaser_name);
+        }
+
+        if ($purchaser_note) {
+            $lines[] = '';
+            $lines[] = __('They left you a message:', 'restart-registry');
+            $lines[] = '';
+            // Indent each line of the note
+            foreach (explode("\n", $purchaser_note) as $note_line) {
+                $lines[] = '    ' . $note_line;
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = sprintf(
+            __("Head to your registry to see what's still needed:\n%s", 'restart-registry'),
+            $registry_url
+        );
+        $lines[] = '';
+        $lines[] = __('With love,', 'restart-registry');
+        $lines[] = __('The Restart Team', 'restart-registry');
+
+        wp_mail(
+            $owner->user_email,
+            $subject,
+            implode("\n", $lines),
+            ['From: ' . $from_name . ' <' . $from_email . '>']
         );
     }
 

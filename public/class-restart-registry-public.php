@@ -40,7 +40,8 @@ class Restart_Registry_Public {
         add_action('wp_ajax_restart_registry_send_invite',           [$this, 'ajax_send_invite']);
         add_action('wp_ajax_restart_registry_create',                [$this, 'ajax_create_registry']);
         add_action('wp_ajax_restart_registry_update',                [$this, 'ajax_update_registry']);
-        add_action('wp_ajax_restart_registry_fetch_url',             [$this, 'ajax_fetch_url']);
+        add_action('wp_ajax_restart_registry_fetch_url',                    [$this, 'ajax_fetch_url']);
+        add_action('wp_ajax_restart_registry_update_notification_prefs',   [$this, 'ajax_update_notification_prefs']);
     }
 
     // =========================================================================
@@ -74,6 +75,7 @@ class Restart_Registry_Public {
                 'confirmPurchase' => __('Mark this item as purchased?', 'restart-registry'),
                 'loading'         => __('Loading…', 'restart-registry'),
                 'error'           => __('An error occurred. Please try again.', 'restart-registry'),
+                'prefsSaved'      => __('Preferences saved.', 'restart-registry'),
             ],
         ]);
     }
@@ -352,6 +354,20 @@ class Restart_Registry_Public {
                     <p class="rr-affiliate-note"><small><?php echo esc_html($disclosure); ?></small></p>
                 <?php endif; ?>
             </div>
+
+            <!-- Notification preferences -->
+            <?php
+            $notify_pref = get_user_meta(get_current_user_id(), 'restart_notify_on_purchase', true);
+            $notify_on   = $notify_pref !== '0';
+            ?>
+            <section class="rr-notification-prefs">
+                <h2 class="rr-notification-prefs__heading"><?php _e('Notification Preferences', 'restart-registry'); ?></h2>
+                <label class="rr-checkbox-label">
+                    <input type="checkbox" id="rr-notify-purchase" <?php checked($notify_on); ?>>
+                    <?php _e('Email me when items are purchased', 'restart-registry'); ?>
+                </label>
+                <p id="rr-notify-prefs-status" class="rr-notify-status" aria-live="polite"></p>
+            </section>
 
             <!-- Share modal -->
             <div class="rr-modal" id="rr-share-modal" aria-hidden="true">
@@ -663,6 +679,38 @@ class Restart_Registry_Public {
                 </div>
             </div>
 
+            <!-- Mark as purchased modal -->
+            <div class="rr-modal" id="rr-purchase-modal" aria-hidden="true">
+                <div class="rr-modal__backdrop"></div>
+                <div class="rr-modal__dialog" role="dialog" aria-labelledby="rr-purchase-modal-title" aria-modal="true">
+                    <div class="rr-modal__header">
+                        <h3 id="rr-purchase-modal-title"><?php _e('Mark as Purchased', 'restart-registry'); ?></h3>
+                        <button type="button" class="rr-modal__close" aria-label="<?php esc_attr_e('Close', 'restart-registry'); ?>">&times;</button>
+                    </div>
+                    <div class="rr-modal__body">
+                        <p class="rr-purchase-modal__item-name"></p>
+                        <p class="rr-purchase-modal__nudge"><?php _e('Let them know who it\'s from!', 'restart-registry'); ?></p>
+                        <form id="rr-purchase-form" class="rr-form">
+                            <input type="hidden" id="rr-purchase-item-id" name="item_id">
+                            <div class="rr-form-group">
+                                <label for="rr-purchaser-name"><?php _e('Your name', 'restart-registry'); ?> <span class="rr-optional"><?php _e('(optional)', 'restart-registry'); ?></span></label>
+                                <input type="text" id="rr-purchaser-name" name="purchaser_name"
+                                       placeholder="<?php esc_attr_e('e.g., Aunt Carol', 'restart-registry'); ?>">
+                            </div>
+                            <div class="rr-form-group">
+                                <label for="rr-purchaser-note"><?php _e('Leave a message', 'restart-registry'); ?> <span class="rr-optional"><?php _e('(optional)', 'restart-registry'); ?></span></label>
+                                <textarea id="rr-purchaser-note" name="purchaser_note" rows="3"
+                                          placeholder="<?php esc_attr_e('A note for the registry owner…', 'restart-registry'); ?>"></textarea>
+                            </div>
+                            <div class="rr-form-actions">
+                                <button type="submit" class="rr-button"><?php _e('Confirm Purchase', 'restart-registry'); ?></button>
+                                <button type="button" class="rr-btn-ghost rr-modal-cancel"><?php _e('Cancel', 'restart-registry'); ?></button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
         </div>
         <?php
         return $this->compact_html(ob_get_clean());
@@ -873,8 +921,9 @@ class Restart_Registry_Public {
         $result = $this->controller->mark_item_purchased(
             $item_id,
             $quantity,
-            sanitize_text_field($_POST['purchaser_name']  ?? ''),
-            sanitize_email($_POST['purchaser_email']       ?? ''),
+            sanitize_text_field($_POST['purchaser_name']   ?? ''),
+            sanitize_email($_POST['purchaser_email']        ?? ''),
+            sanitize_textarea_field($_POST['purchaser_note'] ?? ''),
             isset($_POST['is_anonymous']) && $_POST['is_anonymous'] === '1'
         );
 
@@ -930,6 +979,17 @@ class Restart_Registry_Public {
 
         $this->controller->update_registry($registry_id, $data);
         wp_send_json_success(['message' => __('Registry updated.', 'restart-registry')]);
+    }
+
+    public function ajax_update_notification_prefs(): void {
+        check_ajax_referer('restart_registry_nonce', 'nonce');
+        if (!is_user_logged_in()) {
+            wp_send_json_error(['message' => __('You must be logged in.', 'restart-registry')]);
+        }
+
+        $notify = isset($_POST['notify_on_purchase']) && $_POST['notify_on_purchase'] === '1';
+        update_user_meta(get_current_user_id(), 'restart_notify_on_purchase', $notify ? '1' : '0');
+        wp_send_json_success(['message' => __('Preferences saved.', 'restart-registry')]);
     }
 
     public function ajax_fetch_url(): void {

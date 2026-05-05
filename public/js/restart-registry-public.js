@@ -389,11 +389,24 @@
 
         // ── Mark as purchased (guest view) ───────────────────────────────────
         $(document).on('click', '.rr-mark-purchased', function() {
-            var $btn    = $(this);
-            var $card   = $btn.closest('.rr-item-card');
-            var itemId  = $card.length ? $card.data('item-id') : $btn.data('item-id');
-            var $button = $btn;
-            var name    = prompt('Your name (optional):') || '';
+            var $btn  = $(this);
+            var $card = $btn.closest('.rr-item-card, .rr-item-row');
+            var itemId = $card.length ? $card.data('item-id') : $btn.data('item-id');
+            var name   = $card.length ? $card.data('name') : '';
+
+            closeModal('#rr-item-detail-modal');
+            $('#rr-purchase-item-id').val(itemId);
+            $('#rr-purchase-modal .rr-purchase-modal__item-name').text(name || '');
+            $('#rr-purchase-form')[0].reset();
+            openModal('#rr-purchase-modal');
+        });
+
+        $('#rr-purchase-form').on('submit', function(e) {
+            e.preventDefault();
+            var $form      = $(this);
+            var $button    = $form.find('button[type="submit"]');
+            var buyerName  = $.trim($form.find('[name="purchaser_name"]').val());
+            var buyerNote  = $.trim($form.find('[name="purchaser_note"]').val());
 
             $button.prop('disabled', true).text(restartRegistry.strings.loading);
 
@@ -401,26 +414,53 @@
                 url:  restartRegistry.ajaxUrl,
                 type: 'POST',
                 data: {
-                    action:         'restart_registry_mark_purchased',
-                    nonce:          restartRegistry.nonce,
-                    item_id:        itemId,
-                    quantity:       1,
-                    purchaser_name: name,
-                    is_anonymous:   name ? '0' : '1'
+                    action:          'restart_registry_mark_purchased',
+                    nonce:           restartRegistry.nonce,
+                    item_id:         $('#rr-purchase-item-id').val(),
+                    quantity:        1,
+                    purchaser_name:  buyerName,
+                    purchaser_note:  buyerNote,
+                    is_anonymous:    buyerName ? '0' : '1'
                 },
                 success: function(response) {
                     if (response.success) {
-                        closeModal('#rr-item-detail-modal');
+                        closeModal('#rr-purchase-modal');
                         showNotice(response.data.message, 'success');
                         setTimeout(function() { window.location.reload(); }, 1500);
                     } else {
                         alert(response.data.message || restartRegistry.strings.error);
-                        $button.prop('disabled', false).text('Mark Fulfilled');
+                        $button.prop('disabled', false).text('Confirm Purchase');
                     }
                 },
                 error: function() {
                     alert(restartRegistry.strings.error);
-                    $button.prop('disabled', false).text('Mark Fulfilled');
+                    $button.prop('disabled', false).text('Confirm Purchase');
+                }
+            });
+        });
+
+        // ── Notification preferences ─────────────────────────────────────────
+        $(document).on('change', '#rr-notify-purchase', function() {
+            var $checkbox = $(this);
+            var $status   = $('#rr-notify-prefs-status');
+
+            $.ajax({
+                url:  restartRegistry.ajaxUrl,
+                type: 'POST',
+                data: {
+                    action:             'restart_registry_update_notification_prefs',
+                    nonce:              restartRegistry.nonce,
+                    notify_on_purchase: $checkbox.is(':checked') ? '1' : '0'
+                },
+                success: function(response) {
+                    $status.text(response.success
+                        ? restartRegistry.strings.prefsSaved
+                        : (response.data.message || restartRegistry.strings.error));
+                    setTimeout(function() { $status.text(''); }, 3000);
+                },
+                error: function() {
+                    $status.text(restartRegistry.strings.error);
+                    setTimeout(function() { $status.text(''); }, 3000);
                 }
             });
         });
