@@ -277,13 +277,15 @@ After move to `restart/`:
 ## Todo
 
 ### Phase 0: Archive old repos
-- [ ] Add README banner to each old repo pointing to new monorepo URL
-- [ ] Make final empty commit in `restart-registry`: `"Archived: project continues in restart/ monorepo"`
-- [ ] Make final empty commit in `restart_lambda`: `"Archived: project continues in restart/ monorepo"`
-- [ ] Make final empty commit in `the-restart-theme`: `"Archived: project continues in restart/ monorepo"`
-- [ ] Archive each old repo on GitHub (Settings → Archive repository)
-- [ ] Add GitHub Actions secrets to new repo (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, LAMBDA_FUNCTION_NAME, API_GATEWAY_KEY, etc.)
-- [ ] Update IAM role trust policy if using GitHub OIDC (repo path change)
+- [x] Add README banner to each old repo pointing to new monorepo URL (https://github.com/amneher/restart)
+- [x] Make final commit in `restart-registry` with README.md (36edacf)
+- [x] Make final commit in `restart_lambda` with README.md (cb72102)
+- [x] Make final commit in `the-restart-theme` with README.md (5310bfc) — no GitHub remote, local only
+- [x] Push archival commits to GitHub for restart-registry and restart_lambda
+- [ ] Archive `amneher/restart-registry` on GitHub (Settings → Danger Zone → Archive) — requires manual step or `gh auth refresh -s repo`
+- [ ] Archive `amneher/restart_lambda` on GitHub (Settings → Danger Zone → Archive) — requires manual step or `gh auth refresh -s repo`
+- [ ] Add GitHub Actions secrets to new repo after Phase 1 (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, LAMBDA_FUNCTION_NAME, API_GATEWAY_KEY, etc.)
+- [ ] Update IAM role trust policy if using GitHub OIDC (repo path: amneher/restart-registry → amneher/restart)
 
 ### Phase 1: Restructure
 - [ ] Create `restart/` directory + `git init`
